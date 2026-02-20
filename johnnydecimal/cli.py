@@ -1059,3 +1059,74 @@ def generate_index():
 
 if __name__ == "__main__":
     cli()
+
+
+@cli.command()
+@click.option("-n", "--top", default=10, help="Number of results to show")
+@click.option("--all", "show_all", is_flag=True, help="Show all, not just top N")
+def triage(top, show_all):
+    """Show where attention is needed most — busiest unsorted dirs, emptiest categories."""
+    jd = get_root()
+
+    unsorted_counts = []
+    empty_cats = []
+    file_id_counts = []
+
+    for area in jd.areas:
+        for category in area.categories:
+            # Count items in xx.01 Unsorted
+            unsorted = None
+            for jd_id in category.ids:
+                if jd_id.sequence == 1:
+                    unsorted = jd_id
+                    break
+            if unsorted and unsorted.path.is_dir():
+                try:
+                    items = [i for i in unsorted.path.iterdir() if not i.name.startswith(".")]
+                    if items:
+                        unsorted_counts.append((len(items), category, unsorted))
+                except PermissionError:
+                    pass
+
+            # Empty categories (only have .00 and/or .01, nothing else)
+            real_ids = [i for i in category.ids if i.sequence not in (0, 1, 99)]
+            if not real_ids:
+                empty_cats.append(category)
+
+            # File-IDs that should probably be dirs
+            for jd_id in category.ids:
+                if jd_id.is_file:
+                    file_id_counts.append((category, jd_id))
+
+    # Sort unsorted by count descending
+    unsorted_counts.sort(key=lambda x: x[0], reverse=True)
+
+    if unsorted_counts:
+        click.echo("📥 BUSIEST UNSORTED (items needing filing):")
+        shown = unsorted_counts if show_all else unsorted_counts[:top]
+        for count, cat, unsorted_id in shown:
+            click.echo(f"  {count:4d}  {cat} ({unsorted_id.id_str})")
+        if not show_all and len(unsorted_counts) > top:
+            click.echo(f"  ... and {len(unsorted_counts) - top} more (use --all)")
+        click.echo()
+
+    if file_id_counts:
+        click.echo(f"📄 FILE-IDS ({len(file_id_counts)} files acting as IDs):")
+        shown = file_id_counts if show_all else file_id_counts[:top]
+        for cat, jd_id in shown:
+            click.echo(f"       {jd_id.id_str} {jd_id.name}  ({cat.name})")
+        if not show_all and len(file_id_counts) > top:
+            click.echo(f"  ... and {len(file_id_counts) - top} more")
+        click.echo()
+
+    if empty_cats:
+        click.echo(f"🏜️  EMPTY CATEGORIES ({len(empty_cats)} with no real content):")
+        shown = empty_cats if show_all else empty_cats[:top]
+        for cat in shown:
+            click.echo(f"       {cat}")
+        if not show_all and len(empty_cats) > top:
+            click.echo(f"  ... and {len(empty_cats) - top} more")
+        click.echo()
+
+    total_unsorted = sum(c for c, _, _ in unsorted_counts)
+    click.echo(f"Total: {total_unsorted} unsorted items across {len(unsorted_counts)} categories")
