@@ -1164,11 +1164,16 @@ def ls_cmd(target, area, depth, files):
         return
 
     if target is None:
-        # List all areas
-        for a in jd.areas:
-            cat_count = len(a.categories)
-            id_count = sum(len(c.ids) for c in a.categories)
-            click.echo(f"{a}  ({cat_count} categories, {id_count} IDs)")
+        if depth is None or depth == 0:
+            # Just list areas
+            for a in jd.areas:
+                cat_count = len(a.categories)
+                id_count = sum(len(c.ids) for c in a.categories)
+                click.echo(f"{a}  ({cat_count} categories, {id_count} IDs)")
+        else:
+            # Cascade into all areas
+            for a in jd.areas:
+                _ls_area(a, depth - 1, files)
         return
 
     # Try as ID first
