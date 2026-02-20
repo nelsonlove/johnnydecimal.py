@@ -539,6 +539,137 @@ def _do_archive(jd, source, dry_run=False):
 
 
 @cli.command()
+@click.argument("target", type=JD_ID)
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would happen without doing it")
+def restore(target, dry_run):
+    """Restore an archived ID or category.
+
+    \b
+    Reverses `jd mv -a`. Finds the item in the appropriate .99 archive
+    and moves it back to its original location.
+
+    \b
+    Examples:
+        jd restore 86.03     → find in 86.99, restore to 86/
+        jd restore 21        → find in 20.99, restore to 20-29/
+    """
+    import re as _re
+
+    jd = get_root()
+    prefix = "(dry run) " if dry_run else ""
+
+    # Try as ID: look in xx.99 inside the same category
+    m = _re.match(r"(\d{2})\.(\d{2})$", target)
+    if m:
+        cat_num = int(m.group(1))
+        cat = jd.find_by_category(cat_num)
+        if not cat:
+            click.echo(f"Category {cat_num} not found.", err=True)
+            raise SystemExit(1)
+
+        enforce_scope(target)
+
+        # Find the archive dir
+        archive_dir = None
+        for child in cat.path.iterdir():
+            if child.is_dir() and child.name.startswith(f"{cat_num:02d}.99"):
+                archive_dir = child
+                break
+        if not archive_dir:
+            click.echo(f"No archive ({cat_num:02d}.99) found in {cat}.", err=True)
+            raise SystemExit(1)
+
+        # Find the item inside archive
+        found = None
+        for child in archive_dir.iterdir():
+            if child.name.startswith(target):
+                found = child
+                break
+        if not found:
+            click.echo(f"{target} not found in {archive_dir.name}.", err=True)
+            raise SystemExit(1)
+
+        dest = cat.path / found.name
+        if dest.exists():
+            click.echo(f"Cannot restore — {dest.name} already exists in {cat}.", err=True)
+            raise SystemExit(1)
+
+        if not dry_run:
+            found.rename(dest)
+        click.echo(f"{prefix}Restored {found.name} → {cat}/")
+
+        # Clean up empty archive dir
+        if not dry_run and archive_dir.exists():
+            remaining = [i for i in archive_dir.iterdir() if not i.name.startswith(".")]
+            if not remaining:
+                archive_dir.rmdir()
+                click.echo(f"  Removed empty {archive_dir.name}")
+        return
+
+    # Try as category: look in x0.99
+    try:
+        cat_num = int(target)
+    except ValueError:
+        click.echo(f"{target} not found.", err=True)
+        raise SystemExit(1)
+
+    enforce_scope(str(cat_num))
+
+    # Find which area this category belongs to
+    target_area = None
+    for a in jd.areas:
+        if a._number <= cat_num <= a._end_number:
+            target_area = a
+            break
+    if not target_area:
+        click.echo(f"No area contains category {cat_num}.", err=True)
+        raise SystemExit(1)
+
+    meta_cat_num = target_area._number
+    meta_cat = jd.find_by_category(meta_cat_num)
+    if not meta_cat:
+        click.echo(f"Area meta category {meta_cat_num} not found.", err=True)
+        raise SystemExit(1)
+
+    # Find archive dir in x0 meta
+    archive_dir = None
+    for child in meta_cat.path.iterdir():
+        if child.is_dir() and child.name.startswith(f"{meta_cat_num:02d}.99"):
+            archive_dir = child
+            break
+    if not archive_dir:
+        click.echo(f"No archive ({meta_cat_num:02d}.99) found.", err=True)
+        raise SystemExit(1)
+
+    # Find the category inside archive
+    cat_prefix = f"{cat_num:02d} "
+    found = None
+    for child in archive_dir.iterdir():
+        if child.name.startswith(cat_prefix):
+            found = child
+            break
+    if not found:
+        click.echo(f"Category {cat_num} not found in {archive_dir.name}.", err=True)
+        raise SystemExit(1)
+
+    dest = target_area.path / found.name
+    if dest.exists():
+        click.echo(f"Cannot restore — {found.name} already exists in {target_area}.", err=True)
+        raise SystemExit(1)
+
+    if not dry_run:
+        found.rename(dest)
+    click.echo(f"{prefix}Restored {found.name} → {target_area}/")
+
+    # Clean up empty archive dir
+    if not dry_run and archive_dir.exists():
+        remaining = [i for i in archive_dir.iterdir() if not i.name.startswith(".")]
+        if not remaining:
+            archive_dir.rmdir()
+            click.echo(f"  Removed empty {archive_dir.name}")
+
+
+@cli.command()
 @click.argument("source", type=JD_ID)
 @click.argument("destination", required=False, default=None)
 @click.option("-a", "--archive", is_flag=True, help="Archive to xx.99 (ID) or x0.99 (category)")
