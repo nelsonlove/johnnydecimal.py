@@ -1130,3 +1130,142 @@ def triage(top, show_all):
 
     total_unsorted = sum(c for c, _, _ in unsorted_counts)
     click.echo(f"Total: {total_unsorted} unsorted items across {len(unsorted_counts)} categories")
+
+
+@cli.command("ls")
+@click.argument("target", type=JD_ID, required=False, default=None)
+@click.option("-a", "--area", type=int, help="List entire area by leading digit (e.g., 2 for 20-29)")
+@click.option("-d", "--depth", type=int, default=None, help="Max depth below target (default: unlimited)")
+@click.option("--files/--no-files", default=True, help="Show files inside IDs")
+def ls_cmd(target, area, depth, files):
+    """List contents of JD locations, recursively.
+
+    \b
+    Examples:
+        jd ls                → list all areas
+        jd ls 26             → everything in category 26
+        jd ls 26.01          → contents of 26.01
+        jd ls --area 2       → everything in 20-29
+        jd ls 26 --depth 1   → just IDs, no contents
+    """
+    jd = get_root()
+
+    if area is not None:
+        # Find the matching area
+        target_area = None
+        for a in jd.areas:
+            if a._number // 10 == area:
+                target_area = a
+                break
+        if not target_area:
+            click.echo(f"No area matching digit {area}.", err=True)
+            raise SystemExit(1)
+        _ls_area(target_area, depth, files)
+        return
+
+    if target is None:
+        # List all areas
+        for a in jd.areas:
+            cat_count = len(a.categories)
+            id_count = sum(len(c.ids) for c in a.categories)
+            click.echo(f"{a}  ({cat_count} categories, {id_count} IDs)")
+        return
+
+    # Try as ID first
+    jd_id = jd.find_by_id(target)
+    if jd_id:
+        _ls_id(jd_id, files)
+        return
+
+    # Try as category
+    try:
+        cat_num = int(target)
+        cat = jd.find_by_category(cat_num)
+        if cat:
+            _ls_category(cat, depth, files)
+            return
+    except ValueError:
+        pass
+
+    click.echo(f"{target} not found.", err=True)
+    raise SystemExit(1)
+
+
+def _ls_area(area, depth, files):
+    """List all categories and their contents in an area."""
+    click.echo(f"📁 {area}")
+    for cat in area.categories:
+        click.echo(f"  📂 {cat}")
+        if depth is not None and depth < 1:
+            continue
+        inner_depth = depth - 1 if depth is not None else None
+        for jd_id in cat.ids:
+            _ls_id_line(jd_id, indent=4, depth=inner_depth, files=files)
+
+
+def _ls_category(cat, depth, files):
+    """List all IDs and their contents in a category."""
+    click.echo(f"📂 {cat}")
+    for jd_id in cat.ids:
+        _ls_id_line(jd_id, indent=2, depth=depth, files=files)
+
+
+def _ls_id(jd_id, files):
+    """List contents of a single ID."""
+    if jd_id.is_file:
+        click.echo(f"📄 {jd_id}")
+        return
+    click.echo(f"📂 {jd_id}")
+    try:
+        items = sorted(jd_id.path.iterdir())
+        for item in items:
+            if item.name.startswith("."):
+                continue
+            icon = "📁" if item.is_dir() else "📄"
+            click.echo(f"  {icon} {item.name}")
+            if item.is_dir() and files:
+                _ls_tree(item, indent=4, max_depth=3, current_depth=0)
+    except PermissionError:
+        click.echo("  (permission denied)")
+
+
+def _ls_id_line(jd_id, indent, depth, files):
+    """Print one ID line, optionally with contents."""
+    prefix = " " * indent
+    if jd_id.is_file:
+        click.echo(f"{prefix}📄 {jd_id}")
+        return
+
+    # Count contents
+    try:
+        items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
+    except PermissionError:
+        items = []
+
+    count_str = f" ({len(items)})" if items else ""
+    click.echo(f"{prefix}📂 {jd_id}{count_str}")
+
+    if not files or (depth is not None and depth < 1):
+        return
+
+    for item in sorted(items):
+        icon = "📁" if item.is_dir() else "📄"
+        click.echo(f"{prefix}  {icon} {item.name}")
+
+
+def _ls_tree(path, indent, max_depth, current_depth):
+    """Recursively list a directory tree."""
+    if current_depth >= max_depth:
+        return
+    try:
+        items = sorted(path.iterdir())
+    except PermissionError:
+        return
+    for item in items:
+        if item.name.startswith("."):
+            continue
+        prefix = " " * indent
+        icon = "📁" if item.is_dir() else "📄"
+        click.echo(f"{prefix}{icon} {item.name}")
+        if item.is_dir():
+            _ls_tree(item, indent + 2, max_depth, current_depth + 1)
