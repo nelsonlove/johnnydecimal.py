@@ -476,7 +476,7 @@ def root():
     click.echo(jd.path)
 
 
-def _ensure_archive_dir(parent_path, cat_num):
+def _ensure_archive_dir(parent_path, cat_num, dry_run=False):
     """Ensure xx.99 Archive dir exists under the given category path. Returns the path."""
     archive_id = f"{cat_num:02d}.99"
     # Look for existing
@@ -485,26 +485,28 @@ def _ensure_archive_dir(parent_path, cat_num):
             return child
     # Create it
     archive_path = parent_path / f"{archive_id} Archive"
-    archive_path.mkdir()
+    if not dry_run:
+        archive_path.mkdir()
     click.echo(f"  Created {archive_path.name}")
     return archive_path
 
 
-def _do_archive(jd, source):
+def _do_archive(jd, source, dry_run=False):
     """Archive a JD ID (→ xx.99) or category (→ x0.99)."""
     enforce_scope(source)
+    prefix = "(dry run) " if dry_run else ""
 
     # Try as full ID first
     source_id = jd.find_by_id(source)
     if source_id:
-        # Archive ID into its own category's .99
-        archive_dir = _ensure_archive_dir(source_id.category.path, source_id.category.number)
+        archive_dir = _ensure_archive_dir(source_id.category.path, source_id.category.number, dry_run)
         dest = archive_dir / source_id.path.name
         if dest.exists():
             click.echo(f"Already exists in archive: {dest}", err=True)
             raise SystemExit(1)
-        source_id.path.rename(dest)
-        click.echo(f"Archived {source_id.path.name} → {archive_dir.name}/")
+        if not dry_run:
+            source_id.path.rename(dest)
+        click.echo(f"{prefix}Archived {source_id.path.name} → {archive_dir.name}/")
         return
 
     # Try as category
@@ -519,29 +521,29 @@ def _do_archive(jd, source):
         click.echo(f"Category {source} not found.", err=True)
         raise SystemExit(1)
 
-    # Archive category into its area's x0.99
     area = source_cat.parent
-    # Find the x0 meta category (e.g., 20 for area 20-29)
-    meta_cat_num = area._number  # 20 for "20-29 Family"
+    meta_cat_num = area._number
     meta_cat = jd.find_by_category(meta_cat_num)
     if not meta_cat:
         click.echo(f"Area meta category {meta_cat_num} not found. Create it first: jd init {meta_cat_num}", err=True)
         raise SystemExit(1)
 
-    archive_dir = _ensure_archive_dir(meta_cat.path, meta_cat_num)
+    archive_dir = _ensure_archive_dir(meta_cat.path, meta_cat_num, dry_run)
     dest = archive_dir / source_cat.path.name
     if dest.exists():
         click.echo(f"Already exists in archive: {dest}", err=True)
         raise SystemExit(1)
-    source_cat.path.rename(dest)
-    click.echo(f"Archived {source_cat.path.name} → {meta_cat_num:02d}.99 Archive/")
+    if not dry_run:
+        source_cat.path.rename(dest)
+    click.echo(f"{prefix}Archived {source_cat.path.name} → {meta_cat_num:02d}.99 Archive/")
 
 
 @cli.command()
 @click.argument("source", type=JD_ID)
 @click.argument("destination", required=False, default=None)
 @click.option("-a", "--archive", is_flag=True, help="Archive to xx.99 (ID) or x0.99 (category)")
-def mv(source, destination, archive):
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would happen without doing it")
+def mv(source, destination, archive, dry_run):
     """Move, rename, or renumber within JD. Smart about what you mean.
 
     \b
@@ -559,7 +561,7 @@ def mv(source, destination, archive):
         if destination:
             click.echo("--archive doesn't take a destination.", err=True)
             raise SystemExit(1)
-        _do_archive(jd, source)
+        _do_archive(jd, source, dry_run)
         return
 
     if not destination:
@@ -615,10 +617,12 @@ def mv(source, destination, archive):
 
         name_part = source_id.name if source_id.name else ""
         new_dir_name = f"{format_jd_id(new_cat_num, new_seq)} {name_part}".rstrip()
+        prefix = "(dry run) " if dry_run else ""
         new_path = target_cat.path / new_dir_name
         old_path = source_id.path
-        old_path.rename(new_path)
-        click.echo(f"{old_path.name} → {new_dir_name}")
+        if not dry_run:
+            old_path.rename(new_path)
+        click.echo(f"{prefix}{old_path.name} → {new_dir_name}")
         if source_id.category.number != new_cat_num:
             click.echo(f"  (moved from {source_id.category} to {target_cat})")
 
@@ -634,14 +638,16 @@ def mv(source, destination, archive):
             click.echo(f"Category {dest_num} not found.", err=True)
             raise SystemExit(1)
 
+        prefix = "(dry run) " if dry_run else ""
         new_seq = target_cat.next_id()
         new_id_str = format_jd_id(dest_num, new_seq)
         name_part = source_id.name if source_id.name else ""
         new_dir_name = f"{new_id_str} {name_part}".rstrip()
         new_path = target_cat.path / new_dir_name
         old_path = source_id.path
-        old_path.rename(new_path)
-        click.echo(f"{old_path.name} → {new_dir_name}")
+        if not dry_run:
+            old_path.rename(new_path)
+        click.echo(f"{prefix}{old_path.name} → {new_dir_name}")
         click.echo(f"  (moved from {source_id.category} to {target_cat})")
 
     else:
@@ -661,9 +667,11 @@ def mv(source, destination, archive):
             click.echo(f"Destination already exists: {new_path}", err=True)
             raise SystemExit(1)
 
+        prefix = "(dry run) " if dry_run else ""
         old_path = target.path
-        old_path.rename(new_path)
-        click.echo(f"{old_path.name} → {new_dir_name}")
+        if not dry_run:
+            old_path.rename(new_path)
+        click.echo(f"{prefix}{old_path.name} → {new_dir_name}")
 
 
 @cli.command()
