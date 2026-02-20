@@ -1192,6 +1192,17 @@ def ls_cmd(ctx, target, area, level, dirs_only):
             raise SystemExit(1)
 
     # Build tree command
+    if shutil.which("tree") is None:
+        # Fallback: plain ls -R
+        for p in paths:
+            click.echo(str(p))
+            ls_cmd = ["ls", "-R"]
+            if dirs_only:
+                ls_cmd += ["-d"]
+            ls_cmd.append(str(p))
+            subprocess.run(ls_cmd)
+        return
+
     cmd = ["tree", "-I", ".DS_Store|.git|__pycache__|.Trash"]
     if level is not None:
         cmd += ["-L", str(level)]
