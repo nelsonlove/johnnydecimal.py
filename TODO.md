@@ -24,6 +24,8 @@
 ## Next Up
 
 ### CLI
+- [ ] `jd backup` — snapshot the JD tree (metadata, structure, or full) to a tarball or manifest
+- [ ] `jd backup restore` — restore from a backup snapshot
 - [ ] `jd cp` — copy into JD (like mv but keeps original)
 - [ ] `jd renum` — batch renumber within a category
 - [ ] `jd stats` — system-wide statistics (total IDs, sizes, age distribution)
