@@ -17,7 +17,7 @@ def enforce_scope(target: str):
     """Check agent scope and exit if out of bounds."""
     allowed, msg = check_scope(target)
     if not allowed:
-        click.echo(f"🚫 {msg}", err=True)
+        click.echo(f"ERROR: {msg}", err=True)
         raise SystemExit(1)
 
 
@@ -283,20 +283,20 @@ def validate():
     # 1. Duplicate IDs
     dupes = jd.find_duplicates()
     for id_str, path1, path2 in dupes:
-        issues.append(f"🔴 DUPLICATE ID {id_str}:\n     {path1}\n     {path2}")
+        issues.append(f"ERROR: DUPLICATE ID {id_str}:\n     {path1}\n     {path2}")
 
     # 2. Mismatched category prefixes
     for jd_id in jd.all_ids():
         if jd_id.is_mismatched:
             issues.append(
-                f"🔴 MISMATCHED PREFIX: {jd_id.id_str} is inside category "
+                f"ERROR: MISMATCHED PREFIX: {jd_id.id_str} is inside category "
                 f"{jd_id.category.number:02d} ({jd_id.category.name})\n"
                 f"     {jd_id.path}"
             )
 
     # 3. Broken symlinks
     for broken in jd.broken_symlinks:
-        warnings.append(f"🔗 BROKEN SYMLINK: {broken}")
+        warnings.append(f"LINK: BROKEN SYMLINK: {broken}")
 
     # 4. Orphan directories (skip capture/inbox categories — unfiled items are expected there)
     orphans = jd.find_orphans()
@@ -311,7 +311,7 @@ def validate():
         in_archive = any(re.match(r"\d{2}\.99\b", a.name) for a in orphan.parents)
         if in_archive:
             continue
-        warnings.append(f"📦 ORPHAN: {orphan}")
+        warnings.append(f"ORPHAN: ORPHAN: {orphan}")
 
     # 5. Convention: x0 should be "Meta - [Area]"
     for area in jd.areas:
@@ -323,13 +323,13 @@ def validate():
             expected_prefix = f"Meta - "
             if not meta_cat.name.startswith(expected_prefix):
                 warnings.append(
-                    f"📐 CONVENTION: Category {meta_num:02d} should be "
+                    f"CONVENTION: CONVENTION: Category {meta_num:02d} should be "
                     f"\"Meta - {area.name}\" but is \"{meta_cat.name}\"\n"
                     f"     {meta_cat.path}"
                 )
         else:
             warnings.append(
-                f"📐 CONVENTION: Area {area} has no meta category ({meta_num:02d})"
+                f"CONVENTION: CONVENTION: Area {area} has no meta category ({meta_num:02d})"
             )
 
     # 6. Convention: xx.00 should exist (category meta)
@@ -339,7 +339,7 @@ def validate():
             meta = jd.find_by_id(meta_id)
             if not meta:
                 warnings.append(
-                    f"📐 CONVENTION: Category {category} missing {meta_id} (category meta)"
+                    f"CONVENTION: CONVENTION: Category {category} missing {meta_id} (category meta)"
                 )
 
     # 7. Convention: xx.01 should be "Unsorted"
@@ -350,12 +350,12 @@ def validate():
             if unsorted:
                 if unsorted.name != "Unsorted":
                     warnings.append(
-                        f"📐 CONVENTION: {unsorted_id} should be \"Unsorted\" "
+                        f"CONVENTION: CONVENTION: {unsorted_id} should be \"Unsorted\" "
                         f"but is \"{unsorted.name}\"\n     {unsorted.path}"
                     )
             else:
                 warnings.append(
-                    f"📐 CONVENTION: Category {category} missing {unsorted_id} Unsorted"
+                    f"CONVENTION: CONVENTION: Category {category} missing {unsorted_id} Unsorted"
                 )
 
     # 8. Symlink declarations in policy
@@ -372,17 +372,17 @@ def validate():
                     expected_target = target.resolve()
                     if actual_target != expected_target:
                         issues.append(
-                            f"🔗 SYMLINK MISMATCH: {cat} points to {actual_target}\n"
+                            f"LINK: SYMLINK MISMATCH: {cat} points to {actual_target}\n"
                             f"     policy expects: {expected_target}"
                         )
                 else:
                     warnings.append(
-                        f"🔗 NOT A SYMLINK: {cat} should be symlinked to {target}\n"
+                        f"LINK: NOT A SYMLINK: {cat} should be symlinked to {target}\n"
                         f"     (declared in {area} policy)"
                     )
             else:
                 warnings.append(
-                    f"🔗 MISSING: Category {cat_num} declared as symlink to {target} but doesn't exist"
+                    f"LINK: MISSING: Category {cat_num} declared as symlink to {target} but doesn't exist"
                 )
 
     # 9. IDs containing subdirectories (when policy says files only)
@@ -418,7 +418,7 @@ def validate():
     for area in jd.areas:
         if "–" in area.path.name:
             warnings.append(
-                f"✏️  EN-DASH: {area.path.name} uses en-dash instead of hyphen"
+                f"STYLE: EN-DASH: {area.path.name} uses en-dash instead of hyphen"
             )
 
     # Print results
@@ -435,7 +435,7 @@ def validate():
         click.echo()
 
     if not issues and not warnings:
-        click.echo("✅ No issues found!")
+        click.echo("No issues found!")
     else:
         click.echo(f"Found {len(issues)} issue(s) and {len(warnings)} warning(s).")
 
@@ -1038,7 +1038,7 @@ def generate_index():
                 if jd_id.is_mismatched:
                     marker = " ⚠️ MISMATCHED"
                 if jd_id.path.is_symlink():
-                    marker += " 🔗"
+                    marker += " (symlink)"
                 lines.append(f"  - {jd_id}{marker}")
         lines.append("")
 
@@ -1102,7 +1102,7 @@ def triage(top, show_all):
     unsorted_counts.sort(key=lambda x: x[0], reverse=True)
 
     if unsorted_counts:
-        click.echo("📥 BUSIEST UNSORTED (items needing filing):")
+        click.echo("BUSIEST UNSORTED (items needing filing):")
         shown = unsorted_counts if show_all else unsorted_counts[:top]
         for count, cat, unsorted_id in shown:
             click.echo(f"  {count:4d}  {cat} ({unsorted_id.id_str})")
@@ -1120,7 +1120,7 @@ def triage(top, show_all):
         click.echo()
 
     if empty_cats:
-        click.echo(f"🏜️  EMPTY CATEGORIES ({len(empty_cats)} with no real content):")
+        click.echo(f"EMPTY CATEGORIES ({len(empty_cats)} with no real content):")
         shown = empty_cats if show_all else empty_cats[:top]
         for cat in shown:
             click.echo(f"       {cat}")
@@ -1135,142 +1135,68 @@ def triage(top, show_all):
 @cli.command("ls")
 @click.argument("target", type=JD_ID, required=False, default=None)
 @click.option("-a", "--area", type=int, help="List entire area by leading digit (e.g., 2 for 20-29)")
-@click.option("-d", "--depth", type=int, default=None, help="Max depth below target (default: unlimited)")
-@click.option("--files/--no-files", default=True, help="Show files inside IDs")
-def ls_cmd(target, area, depth, files):
-    """List contents of JD locations, recursively.
+@click.option("-L", "--level", type=int, default=None, help="Max depth (like tree -L)")
+@click.option("-d", "--dirs-only", is_flag=True, help="Only show directories")
+@click.pass_context
+def ls_cmd(ctx, target, area, level, dirs_only):
+    """List contents of JD locations using tree.
 
     \b
     Examples:
         jd ls                → list all areas
-        jd ls 26             → everything in category 26
-        jd ls 26.01          → contents of 26.01
-        jd ls --area 2       → everything in 20-29
-        jd ls 26 --depth 1   → just IDs, no contents
+        jd ls 26             → tree of category 26
+        jd ls 26.01          → tree of 26.01
+        jd ls --area 2       → tree of 20-29
+        jd ls -L 1 26        → one level deep
     """
+    import subprocess
+
     jd = get_root()
 
+    # Resolve target to one or more paths
+    paths = []
+
     if area is not None:
-        # Find the matching area
-        target_area = None
         for a in jd.areas:
             if a._number // 10 == area:
-                target_area = a
+                paths.append(a.path)
                 break
-        if not target_area:
+        if not paths:
             click.echo(f"No area matching digit {area}.", err=True)
             raise SystemExit(1)
-        _ls_area(target_area, depth, files)
+
+    elif target is None:
+        # No target: list areas as a summary (no tree)
+        for a in jd.areas:
+            cat_count = len(a.categories)
+            id_count = sum(len(c.ids) for c in a.categories)
+            click.echo(f"{a}  ({cat_count} categories, {id_count} IDs)")
         return
 
-    if target is None:
-        if depth is None or depth == 0:
-            # Just list areas
-            for a in jd.areas:
-                cat_count = len(a.categories)
-                id_count = sum(len(c.ids) for c in a.categories)
-                click.echo(f"{a}  ({cat_count} categories, {id_count} IDs)")
+    else:
+        # Try as ID
+        jd_id = jd.find_by_id(target)
+        if jd_id:
+            paths.append(jd_id.path)
         else:
-            # Cascade into all areas
-            for a in jd.areas:
-                _ls_area(a, depth - 1, files)
-        return
+            # Try as category
+            try:
+                cat = jd.find_by_category(int(target))
+                if cat:
+                    paths.append(cat.path)
+            except ValueError:
+                pass
 
-    # Try as ID first
-    jd_id = jd.find_by_id(target)
-    if jd_id:
-        _ls_id(jd_id, files)
-        return
+        if not paths:
+            click.echo(f"{target} not found.", err=True)
+            raise SystemExit(1)
 
-    # Try as category
-    try:
-        cat_num = int(target)
-        cat = jd.find_by_category(cat_num)
-        if cat:
-            _ls_category(cat, depth, files)
-            return
-    except ValueError:
-        pass
+    # Build tree command
+    cmd = ["tree", "-I", ".DS_Store|.git|__pycache__|.Trash"]
+    if level is not None:
+        cmd += ["-L", str(level)]
+    if dirs_only:
+        cmd += ["-d"]
+    cmd += [str(p) for p in paths]
 
-    click.echo(f"{target} not found.", err=True)
-    raise SystemExit(1)
-
-
-def _ls_area(area, depth, files):
-    """List all categories and their contents in an area."""
-    click.echo(f"{area}")
-    for cat in area.categories:
-        click.echo(f"  {cat}")
-        if depth is not None and depth < 1:
-            continue
-        inner_depth = depth - 1 if depth is not None else None
-        for jd_id in cat.ids:
-            _ls_id_line(jd_id, indent=4, depth=inner_depth, files=files)
-
-
-def _ls_category(cat, depth, files):
-    """List all IDs and their contents in a category."""
-    click.echo(f"{cat}")
-    for jd_id in cat.ids:
-        _ls_id_line(jd_id, indent=2, depth=depth, files=files)
-
-
-def _ls_id(jd_id, files):
-    """List contents of a single ID."""
-    if jd_id.is_file:
-        click.echo(f"{jd_id}")
-        return
-    click.echo(f"{jd_id}")
-    try:
-        items = sorted(jd_id.path.iterdir())
-        for item in items:
-            if item.name.startswith("."):
-                continue
-            icon = "📁" if item.is_dir() else "📄"
-            click.echo(f"  {icon} {item.name}")
-            if item.is_dir() and files:
-                _ls_tree(item, indent=4, max_depth=3, current_depth=0)
-    except PermissionError:
-        click.echo("  (permission denied)")
-
-
-def _ls_id_line(jd_id, indent, depth, files):
-    """Print one ID line, optionally with contents."""
-    prefix = " " * indent
-    if jd_id.is_file:
-        click.echo(f"{prefix}{jd_id}")
-        return
-
-    # Count contents
-    try:
-        items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
-    except PermissionError:
-        items = []
-
-    count_str = f" ({len(items)})" if items else ""
-    click.echo(f"{prefix}{jd_id}{count_str}")
-
-    if not files or (depth is not None and depth < 1):
-        return
-
-    for item in sorted(items):
-        icon = "📁" if item.is_dir() else "📄"
-        click.echo(f"{prefix}  {icon} {item.name}")
-
-
-def _ls_tree(path, indent, max_depth, current_depth):
-    """Recursively list a directory tree."""
-    if current_depth >= max_depth:
-        return
-    try:
-        items = sorted(path.iterdir())
-    except PermissionError:
-        return
-    for item in items:
-        if item.name.startswith("."):
-            continue
-        prefix = " " * indent
-        icon = "📁" if item.is_dir() else "📄"
-        click.echo(f"{prefix}{icon} {item.name}")
-        if item.is_dir():
-            _ls_tree(item, indent + 2, max_depth, current_depth + 1)
+    subprocess.run(cmd)
