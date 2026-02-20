@@ -538,10 +538,31 @@ def _do_archive(jd, source, dry_run=False):
     click.echo(f"{prefix}Archived {source_cat.path.name} → {meta_cat_num:02d}.99 Archive/")
 
 
+def _count_items(path):
+    """Count non-hidden items in a directory."""
+    if not path.is_dir():
+        return 0
+    try:
+        return len([i for i in path.iterdir() if not i.name.startswith(".")])
+    except PermissionError:
+        return 0
+
+
+def _show_conflict(archived, existing, parent, target_id):
+    """Show details about a restore conflict."""
+    archived_count = _count_items(archived)
+    existing_count = _count_items(existing)
+    click.echo(f"Cannot restore — {target_id} already exists.", err=True)
+    click.echo(f"  Archived: {archived.name} ({archived_count} items)", err=True)
+    click.echo(f"  Current:  {existing.name} ({existing_count} items)", err=True)
+    click.echo(f"  Use --renumber to restore to next available number", err=True)
+
+
 @cli.command()
 @click.argument("target", type=JD_ID)
 @click.option("-n", "--dry-run", is_flag=True, help="Show what would happen without doing it")
-def restore(target, dry_run):
+@click.option("--renumber", is_flag=True, help="If original ID is taken, restore to next available")
+def restore(target, dry_run, renumber):
     """Restore an archived ID or category.
 
     \b
@@ -552,6 +573,7 @@ def restore(target, dry_run):
     Examples:
         jd restore 86.03     → find in 86.99, restore to 86/
         jd restore 21        → find in 20.99, restore to 20-29/
+        jd restore --renumber 86.03  → restore as next available if 86.03 taken
     """
     import re as _re
 
@@ -589,14 +611,26 @@ def restore(target, dry_run):
             click.echo(f"{target} not found in {archive_dir.name}.", err=True)
             raise SystemExit(1)
 
+        # Check if the ID number is already taken (even with a different name)
+        existing = jd.find_by_id(target)
         dest = cat.path / found.name
-        if dest.exists():
-            click.echo(f"Cannot restore — {dest.name} already exists in {cat}.", err=True)
-            raise SystemExit(1)
-
-        if not dry_run:
-            found.rename(dest)
-        click.echo(f"{prefix}Restored {found.name} → {cat}/")
+        if existing:
+            if not renumber:
+                _show_conflict(found, existing.path, cat, target)
+                raise SystemExit(1)
+            # Renumber: assign next available ID, keep name
+            new_seq = cat.next_id()
+            new_id_str = format_jd_id(cat_num, new_seq)
+            name_part = found.name.split(" ", 1)[1] if " " in found.name else ""
+            new_name = f"{new_id_str} {name_part}".rstrip()
+            dest = cat.path / new_name
+            if not dry_run:
+                found.rename(dest)
+            click.echo(f"{prefix}Restored {found.name} → {new_name} (renumbered)")
+        else:
+            if not dry_run:
+                found.rename(dest)
+            click.echo(f"{prefix}Restored {found.name} → {cat}/")
 
         # Clean up empty archive dir
         if not dry_run and archive_dir.exists():
@@ -654,12 +688,29 @@ def restore(target, dry_run):
 
     dest = target_area.path / found.name
     if dest.exists():
-        click.echo(f"Cannot restore — {found.name} already exists in {target_area}.", err=True)
-        raise SystemExit(1)
-
-    if not dry_run:
-        found.rename(dest)
-    click.echo(f"{prefix}Restored {found.name} → {target_area}/")
+        if not renumber:
+            _show_conflict(found, dest, target_area, str(cat_num))
+            raise SystemExit(1)
+        # Renumber: find next available category number in this area
+        used = {c.number for c in target_area.categories}
+        new_num = None
+        for i in range(target_area._number + 1, target_area._end_number + 1):
+            if i not in used:
+                new_num = i
+                break
+        if new_num is None:
+            click.echo(f"No available category numbers in {target_area}.", err=True)
+            raise SystemExit(1)
+        name_part = found.name.split(" ", 1)[1] if " " in found.name else ""
+        new_name = f"{new_num:02d} {name_part}".rstrip()
+        dest = target_area.path / new_name
+        if not dry_run:
+            found.rename(dest)
+        click.echo(f"{prefix}Restored {found.name} → {new_name} (renumbered)")
+    else:
+        if not dry_run:
+            found.rename(dest)
+        click.echo(f"{prefix}Restored {found.name} → {target_area}/")
 
     # Clean up empty archive dir
     if not dry_run and archive_dir.exists():
