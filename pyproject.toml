@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "johnnydecimal"
+version = "0.2.0"
+description = "CLI for managing a Johnny Decimal filing system"
+requires-python = ">=3.10"
+dependencies = ["click>=8.0", "pyyaml>=6.0"]
+
+[project.scripts]
+jd = "johnnydecimal.cli:cli"
