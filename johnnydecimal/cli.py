@@ -1401,3 +1401,33 @@ def ls_cmd(ctx, target, area, level, dirs_only):
     cmd += [str(p) for p in paths]
 
     subprocess.run(cmd)
+
+
+@cli.command("open")
+@click.argument("target", type=JD_ID)
+def open_cmd(target):
+    """Open a JD location in Finder (macOS) or file manager."""
+    import subprocess
+    import platform
+
+    jd = get_root()
+
+    # Resolve target
+    result = jd.find_by_id(target)
+    if not result:
+        try:
+            result = jd.find_by_category(int(target))
+        except ValueError:
+            pass
+
+    if not result:
+        click.echo(f"{target} not found.", err=True)
+        raise SystemExit(1)
+
+    path = result.path
+    if platform.system() == "Darwin":
+        subprocess.run(["open", str(path)])
+    elif platform.system() == "Linux":
+        subprocess.run(["xdg-open", str(path)])
+    else:
+        click.echo(str(path))
