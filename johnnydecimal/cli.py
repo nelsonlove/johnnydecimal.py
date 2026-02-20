@@ -398,7 +398,7 @@ def validate():
                 if len(subdirs) > 3:
                     dir_names += f" (+{len(subdirs) - 3} more)"
                 warnings.append(
-                    f"📁 SUBDIRS IN ID: {jd_id.id_str} {jd_id.name} contains "
+                    f"SUBDIRS IN ID: {jd_id.id_str} {jd_id.name} contains "
                     f"directories: {dir_names}\n     {jd_id.path}\n"
                     f"     (policy ids_files_only=true)"
                 )
@@ -409,7 +409,7 @@ def validate():
             policy = resolve_policy(jd_id.path.parent, jd.path)
             if not get_convention(policy, "ids_as_files", False):
                 issues.append(
-                    f"📄 FILE AS ID: {jd_id.id_str} {jd_id.name} is a file, not a directory\n"
+                    f"FILE AS ID: {jd_id.id_str} {jd_id.name} is a file, not a directory\n"
                     f"     {jd_id.path}\n"
                     f"     (policy ids_as_files=false)"
                 )
@@ -1111,7 +1111,7 @@ def triage(top, show_all):
         click.echo()
 
     if file_id_counts:
-        click.echo(f"📄 FILE-IDS ({len(file_id_counts)} files acting as IDs):")
+        click.echo(f"FILE-IDS ({len(file_id_counts)} files acting as IDs):")
         shown = file_id_counts if show_all else file_id_counts[:top]
         for cat, jd_id in shown:
             click.echo(f"       {jd_id.id_str} {jd_id.name}  ({cat.name})")
@@ -1198,9 +1198,9 @@ def ls_cmd(target, area, depth, files):
 
 def _ls_area(area, depth, files):
     """List all categories and their contents in an area."""
-    click.echo(f"📁 {area}")
+    click.echo(f"{area}")
     for cat in area.categories:
-        click.echo(f"  📂 {cat}")
+        click.echo(f"  {cat}")
         if depth is not None and depth < 1:
             continue
         inner_depth = depth - 1 if depth is not None else None
@@ -1210,7 +1210,7 @@ def _ls_area(area, depth, files):
 
 def _ls_category(cat, depth, files):
     """List all IDs and their contents in a category."""
-    click.echo(f"📂 {cat}")
+    click.echo(f"{cat}")
     for jd_id in cat.ids:
         _ls_id_line(jd_id, indent=2, depth=depth, files=files)
 
@@ -1218,9 +1218,9 @@ def _ls_category(cat, depth, files):
 def _ls_id(jd_id, files):
     """List contents of a single ID."""
     if jd_id.is_file:
-        click.echo(f"📄 {jd_id}")
+        click.echo(f"{jd_id}")
         return
-    click.echo(f"📂 {jd_id}")
+    click.echo(f"{jd_id}")
     try:
         items = sorted(jd_id.path.iterdir())
         for item in items:
@@ -1238,7 +1238,7 @@ def _ls_id_line(jd_id, indent, depth, files):
     """Print one ID line, optionally with contents."""
     prefix = " " * indent
     if jd_id.is_file:
-        click.echo(f"{prefix}📄 {jd_id}")
+        click.echo(f"{prefix}{jd_id}")
         return
 
     # Count contents
@@ -1248,7 +1248,7 @@ def _ls_id_line(jd_id, indent, depth, files):
         items = []
 
     count_str = f" ({len(items)})" if items else ""
-    click.echo(f"{prefix}📂 {jd_id}{count_str}")
+    click.echo(f"{prefix}{jd_id}{count_str}")
 
     if not files or (depth is not None and depth < 1):
         return
