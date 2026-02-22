@@ -224,6 +224,52 @@ def resolve_policy(path: Path, root: Path) -> dict:
     return effective
 
 
+def _find_root_policy(root: Path) -> Optional[Path]:
+    """
+    Find the root-level policy.yaml by walking 00-09 → 00 → 00.00*.
+
+    Uses prefix matching (00.00*) since meta dirs are typically named
+    '00.00 Meta', not bare '00.00'.
+    """
+    import re as _re
+
+    for area_child in root.iterdir():
+        if area_child.is_dir() and _re.match(r"00[-–]09 ", area_child.name):
+            for cat_child in area_child.iterdir():
+                if cat_child.is_dir() and cat_child.name.startswith("00 "):
+                    for meta_child in cat_child.iterdir():
+                        if meta_child.is_dir() and meta_child.name.startswith("00.00"):
+                            policy_path = meta_child / POLICY_FILENAME
+                            if policy_path.exists():
+                                return policy_path
+    return None
+
+
+def get_volumes(root: Path) -> dict:
+    """
+    Get volume declarations from the root-level policy.
+
+    Returns dict of volume name → {"mount": Path, "root": str}.
+    Empty dict if no volumes declared.
+    """
+    policy_path = _find_root_policy(root)
+    if not policy_path:
+        return {}
+    try:
+        with open(policy_path) as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return {}
+
+    volumes = data.get("volumes", {})
+    result = {}
+    for name, conf in volumes.items():
+        mount = conf.get("mount", "")
+        vol_root = conf.get("root", "")
+        result[name] = {"mount": Path(mount), "root": vol_root}
+    return result
+
+
 def get_convention(policy: dict, key: str, default: Any = None) -> Any:
     """Get a convention value from a resolved policy."""
     conventions = policy.get("conventions", {})

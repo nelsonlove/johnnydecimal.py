@@ -8,7 +8,7 @@ import click
 
 from johnnydecimal import api
 from johnnydecimal.completion import JD_ID
-from johnnydecimal.policy import resolve_policy, get_convention
+from johnnydecimal.policy import resolve_policy, get_convention, get_volumes
 from johnnydecimal.scope import check_scope
 from johnnydecimal.util import parse_jd_id_string, format_jd_id
 
@@ -264,21 +264,40 @@ def new_category(area, name, explicit_num, init):
     click.echo(f"Created: {new_path}")
 
     if init:
-        meta_path = new_path / format_jd_id(next_cat, 0)
+        meta_name = f"{format_jd_id(next_cat, 0)} {name} - Meta"
+        meta_path = new_path / meta_name
         meta_path.mkdir()
-        click.echo(f"  + {format_jd_id(next_cat, 0)}")
+        click.echo(f"  + {meta_name}")
 
-        unsorted_path = new_path / f"{format_jd_id(next_cat, 1)} Unsorted"
+        unsorted_suffix = "Unsorted" if next_cat % 10 == 0 else f"{name} - Unsorted"
+        unsorted_name = f"{format_jd_id(next_cat, 1)} {unsorted_suffix}"
+        unsorted_path = new_path / unsorted_name
         unsorted_path.mkdir()
-        click.echo(f"  + {format_jd_id(next_cat, 1)} Unsorted")
+        click.echo(f"  + {unsorted_name}")
 
 
 @cli.command()
-def validate():
+@click.option("--fix", is_flag=True, help="Auto-fix safe issues (conventions, en-dashes, broken symlinks)")
+def validate(fix):
     """Validate the JD filing system for consistency issues."""
     jd = get_root()
     issues = []
     warnings = []
+    fixed = []
+
+    # 0. Fix en-dashes first (renaming areas affects paths used by later checks)
+    for area in jd.areas:
+        if "–" in area.path.name:
+            if fix:
+                new_name = area.path.name.replace("–", "-")
+                new_path = area.path.parent / new_name
+                area.path.rename(new_path)
+                area.path = new_path
+                fixed.append(f"STYLE: Renamed {area.path.name}: en-dash → hyphen")
+            else:
+                warnings.append(
+                    f"STYLE: EN-DASH: {area.path.name} uses en-dash instead of hyphen"
+                )
 
     # 1. Duplicate IDs
     dupes = jd.find_duplicates()
@@ -296,7 +315,11 @@ def validate():
 
     # 3. Broken symlinks
     for broken in jd.broken_symlinks:
-        warnings.append(f"LINK: BROKEN SYMLINK: {broken}")
+        if fix:
+            broken.unlink()
+            fixed.append(f"LINK: Removed broken symlink: {broken}")
+        else:
+            warnings.append(f"LINK: BROKEN SYMLINK: {broken}")
 
     # 4. Orphan directories (skip capture/inbox categories — unfiled items are expected there)
     orphans = jd.find_orphans()
@@ -313,50 +336,104 @@ def validate():
             continue
         warnings.append(f"ORPHAN: ORPHAN: {orphan}")
 
-    # 5. Convention: x0 should be "Meta - [Area]"
+    # 5. Convention: x0 should be "[Area] - Meta"
     for area in jd.areas:
         meta_num = area._number
         meta_cat = jd.find_by_category(meta_num)
         if area._number == 0:
             continue  # 00-09 Meta is the exception
         if meta_cat:
-            expected_prefix = f"Meta - "
-            if not meta_cat.name.startswith(expected_prefix):
-                warnings.append(
-                    f"CONVENTION: CONVENTION: Category {meta_num:02d} should be "
-                    f"\"Meta - {area.name}\" but is \"{meta_cat.name}\"\n"
-                    f"     {meta_cat.path}"
-                )
+            expected_suffix = " - Meta"
+            if not meta_cat.name.endswith(expected_suffix):
+                if fix:
+                    new_name = f"{meta_num:02d} {area.name} - Meta"
+                    new_path = meta_cat.path.parent / new_name
+                    meta_cat.path.rename(new_path)
+                    fixed.append(
+                        f"CONVENTION: Renamed {meta_cat.path.name} → {new_name}"
+                    )
+                    meta_cat.path = new_path
+                else:
+                    warnings.append(
+                        f"CONVENTION: CONVENTION: Category {meta_num:02d} should be "
+                        f"\"{area.name} - Meta\" but is \"{meta_cat.name}\"\n"
+                        f"     {meta_cat.path}"
+                    )
         else:
             warnings.append(
                 f"CONVENTION: CONVENTION: Area {area} has no meta category ({meta_num:02d})"
             )
 
-    # 6. Convention: xx.00 should exist (category meta)
+    # 6. Convention: xx.00 should exist and be named "[Category] - Meta"
+    #    (x0 meta categories just get "Meta" since they're already the meta)
     for area in jd.areas:
         for category in area.categories:
             meta_id = format_jd_id(category.number, 0)
+            if category.number % 10 == 0:
+                expected_meta_name = "Meta"
+            else:
+                expected_meta_name = f"{category.name} - Meta"
             meta = jd.find_by_id(meta_id)
             if not meta:
-                warnings.append(
-                    f"CONVENTION: CONVENTION: Category {category} missing {meta_id} (category meta)"
-                )
+                if fix:
+                    meta_name = f"{meta_id} {expected_meta_name}"
+                    meta_path = category.path / meta_name
+                    meta_path.mkdir()
+                    fixed.append(f"CONVENTION: Created {meta_path}")
+                else:
+                    warnings.append(
+                        f"CONVENTION: CONVENTION: Category {category} missing {meta_id} (category meta)"
+                    )
+            elif meta.name != expected_meta_name:
+                if fix:
+                    new_name = f"{meta_id} {expected_meta_name}"
+                    new_path = meta.path.parent / new_name
+                    meta.path.rename(new_path)
+                    fixed.append(
+                        f"CONVENTION: Renamed {meta.path.name} → {new_name}"
+                    )
+                    meta.path = new_path
+                else:
+                    warnings.append(
+                        f"CONVENTION: CONVENTION: {meta_id} should be \"{expected_meta_name}\" "
+                        f"but is \"{meta.name}\"\n     {meta.path}"
+                    )
 
-    # 7. Convention: xx.01 should be "Unsorted"
+    # 7. Convention: xx.01 should be "[Category] - Unsorted"
+    #    (x0 meta categories just get "Unsorted")
     for area in jd.areas:
         for category in area.categories:
             unsorted_id = format_jd_id(category.number, 1)
+            if category.number % 10 == 0:
+                expected_unsorted_name = "Unsorted"
+            else:
+                expected_unsorted_name = f"{category.name} - Unsorted"
             unsorted = jd.find_by_id(unsorted_id)
             if unsorted:
-                if unsorted.name != "Unsorted":
-                    warnings.append(
-                        f"CONVENTION: CONVENTION: {unsorted_id} should be \"Unsorted\" "
-                        f"but is \"{unsorted.name}\"\n     {unsorted.path}"
-                    )
+                if unsorted.name != expected_unsorted_name:
+                    if fix:
+                        new_name = f"{unsorted_id} {expected_unsorted_name}"
+                        new_path = unsorted.path.parent / new_name
+                        unsorted.path.rename(new_path)
+                        fixed.append(
+                            f"CONVENTION: Renamed {unsorted.path.name} → {new_name}"
+                        )
+                        unsorted.path = new_path
+                    else:
+                        warnings.append(
+                            f"CONVENTION: CONVENTION: {unsorted_id} should be \"{expected_unsorted_name}\" "
+                            f"but is \"{unsorted.name}\"\n     {unsorted.path}"
+                        )
             else:
-                warnings.append(
-                    f"CONVENTION: CONVENTION: Category {category} missing {unsorted_id} Unsorted"
-                )
+                if fix:
+                    unsorted_name = f"{unsorted_id} {expected_unsorted_name}"
+                    unsorted_path = category.path / unsorted_name
+                    unsorted_path.mkdir()
+                    fixed.append(f"CONVENTION: Created {unsorted_path}")
+                else:
+                    warnings.append(
+                        f"CONVENTION: CONVENTION: Category {category} missing {unsorted_id} {expected_unsorted_name}"
+                    )
 
     # 8. Symlink declarations in policy
     for area in jd.areas:
@@ -391,7 +468,7 @@ def validate():
             continue  # files can't contain subdirs
         policy = resolve_policy(jd_id.path, jd.path)
         if get_convention(policy, "ids_files_only", False):
-            subdirs = [d for d in jd_id.path.iterdir() 
+            subdirs = [d for d in jd_id.path.iterdir()
                       if d.is_dir() and not d.name.startswith(".")]
             if subdirs:
                 dir_names = ", ".join(d.name for d in subdirs[:3])
@@ -404,8 +481,21 @@ def validate():
                 )
 
     # 10. File-IDs when policy disallows them
+    volumes = get_volumes(jd.path)
+    volume_names = set(volumes.keys())
     for jd_id in jd.all_ids():
         if jd_id.is_file:
+            # Check if this is a volume reference (alias file with [Volume Name])
+            vol_match = re.match(r"\d{2}\.\d{2} .+ \[(.+)\]$", jd_id.path.name)
+            if vol_match and vol_match.group(1) in volume_names:
+                vol_name = vol_match.group(1)
+                warnings.append(
+                    f"VOLUME: {jd_id.id_str} {jd_id.name} is an alias for {vol_name}\n"
+                    f"     {jd_id.path}\n"
+                    f"     (run 'jd volume link' to convert to symlink)"
+                )
+                continue
+
             policy = resolve_policy(jd_id.path.parent, jd.path)
             if not get_convention(policy, "ids_as_files", False):
                 issues.append(
@@ -414,14 +504,13 @@ def validate():
                     f"     (policy ids_as_files=false)"
                 )
 
-    # 11. En-dash vs hyphen in area names
-    for area in jd.areas:
-        if "–" in area.path.name:
-            warnings.append(
-                f"STYLE: EN-DASH: {area.path.name} uses en-dash instead of hyphen"
-            )
-
     # Print results
+    if fixed:
+        click.echo("=== FIXED ===")
+        for f in fixed:
+            click.echo(f)
+        click.echo()
+
     if issues:
         click.echo("=== ISSUES (should fix) ===")
         for issue in issues:
@@ -434,10 +523,17 @@ def validate():
             click.echo(warning)
         click.echo()
 
-    if not issues and not warnings:
+    if not issues and not warnings and not fixed:
         click.echo("No issues found!")
     else:
-        click.echo(f"Found {len(issues)} issue(s) and {len(warnings)} warning(s).")
+        parts = []
+        if fixed:
+            parts.append(f"{len(fixed)} fixed")
+        if issues:
+            parts.append(f"{len(issues)} issue(s)")
+        if warnings:
+            parts.append(f"{len(warnings)} warning(s)")
+        click.echo(f"Found {', '.join(parts)}.")
 
 
 @cli.command()
@@ -874,21 +970,23 @@ def init(category_num, meta, unsorted):
 
     if meta:
         meta_id = format_jd_id(category_num, 0)
-        meta_path = category.path / meta_id
+        meta_name = f"{meta_id} {category.name} - Meta"
+        meta_path = category.path / meta_name
         if not meta_path.exists():
             meta_path.mkdir()
-            created.append(meta_id)
+            created.append(meta_name)
         else:
             click.echo(f"  exists: {meta_id}")
 
     if unsorted:
-        unsorted_id = f"{format_jd_id(category_num, 1)} Unsorted"
-        unsorted_path = category.path / unsorted_id
+        unsorted_suffix = "Unsorted" if category_num % 10 == 0 else f"{category.name} - Unsorted"
+        unsorted_name = f"{format_jd_id(category_num, 1)} {unsorted_suffix}"
+        unsorted_path = category.path / unsorted_name
         if not unsorted_path.exists():
             unsorted_path.mkdir()
-            created.append(unsorted_id)
+            created.append(unsorted_name)
         else:
-            click.echo(f"  exists: {unsorted_id}")
+            click.echo(f"  exists: {unsorted_name}")
 
     if created:
         for c in created:
@@ -911,13 +1009,14 @@ def init_all(meta, unsorted, dry_run):
             to_create = []
 
             if meta:
-                meta_id = format_jd_id(category.number, 0)
-                meta_path = category.path / meta_id
+                meta_name = f"{format_jd_id(category.number, 0)} {category.name} - Meta"
+                meta_path = category.path / meta_name
                 if not meta_path.exists():
-                    to_create.append((meta_path, meta_id))
+                    to_create.append((meta_path, meta_name))
 
             if unsorted:
-                unsorted_name = f"{format_jd_id(category.number, 1)} Unsorted"
+                unsorted_suffix = "Unsorted" if category.number % 10 == 0 else f"{category.name} - Unsorted"
+                unsorted_name = f"{format_jd_id(category.number, 1)} {unsorted_suffix}"
                 unsorted_path = category.path / unsorted_name
                 if not unsorted_path.exists():
                     to_create.append((unsorted_path, unsorted_name))
@@ -1245,6 +1344,117 @@ def generate_index():
     json_path = index_path.parent / "jd.json"
     json_path.write_text(json.dumps(jd.to_dict(), indent=2) + "\n")
     click.echo(f"Generated: {json_path}")
+
+
+@cli.group()
+def volume():
+    """Manage external volumes linked into the JD tree."""
+    pass
+
+
+def _find_volume_references(jd, volumes):
+    """
+    Find all IDs that are volume references (alias files with [Volume Name] suffix).
+
+    Returns list of (jd_id, volume_name) tuples.
+    """
+    refs = []
+    volume_names = set(volumes.keys())
+    for jd_id in jd.all_ids():
+        if jd_id.path.is_symlink() or jd_id.path.is_dir():
+            continue
+        # Check if name matches XX.YY Something [Volume Name]
+        m = re.match(r"\d{2}\.\d{2} .+ \[(.+)\]$", jd_id.path.name)
+        if m and m.group(1) in volume_names:
+            refs.append((jd_id, m.group(1)))
+    return refs
+
+
+@volume.command("list")
+def volume_list():
+    """Show configured volumes and their mount status."""
+    jd = get_root()
+    volumes = get_volumes(jd.path)
+
+    if not volumes:
+        click.echo("No volumes declared in root policy.yaml.")
+        click.echo("Add a 'volumes' key to your root policy file.")
+        return
+
+    refs = _find_volume_references(jd, volumes)
+
+    for name, conf in volumes.items():
+        mount = conf["mount"]
+        mounted = mount.exists()
+        status = "mounted" if mounted else "not mounted"
+        count = sum(1 for _, vn in refs if vn == name)
+        click.echo(f"{name:<20s} {str(mount):<30s} {status:<14s} ({count} IDs)")
+
+
+@volume.command("link")
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would happen without making changes")
+def volume_link(dry_run):
+    """Replace volume alias files with symlinks to mounted volumes."""
+    jd = get_root()
+    volumes = get_volumes(jd.path)
+
+    if not volumes:
+        click.echo("No volumes declared in root policy.yaml.")
+        return
+
+    refs = _find_volume_references(jd, volumes)
+    if not refs:
+        click.echo("No volume references found.")
+        return
+
+    prefix = "(dry run) " if dry_run else ""
+    linked = 0
+    skipped = 0
+
+    for vol_name, conf in volumes.items():
+        mount = conf["mount"]
+        vol_root = conf["root"]
+        vol_refs = [(jd_id, vn) for jd_id, vn in refs if vn == vol_name]
+
+        if not vol_refs:
+            continue
+
+        if not mount.exists():
+            click.echo(f"\n{vol_name}: skipped — not mounted ({mount})")
+            skipped += len(vol_refs)
+            continue
+
+        click.echo(f"\n{vol_name}: ({mount})")
+        jd_root = mount / vol_root if vol_root else mount
+        try:
+            volume_jd = api.get_system(jd_root)
+        except Exception as e:
+            click.echo(f"  ERROR: Cannot load JD tree at {jd_root}: {e}")
+            skipped += len(vol_refs)
+            continue
+
+        for jd_id, _ in vol_refs:
+            target = volume_jd.find_by_id(jd_id.id_str)
+            if not target:
+                click.echo(f"  SKIP: {jd_id.id_str} not found on volume")
+                skipped += 1
+                continue
+
+            # New symlink name: strip the [Volume Name] suffix
+            old_name = jd_id.path.name
+            new_name = re.sub(r"\s*\[.+\]$", "", old_name)
+            symlink_path = jd_id.path.parent / new_name
+
+            click.echo(f"  {old_name}")
+            click.echo(f"    → {target.path}")
+
+            if not dry_run:
+                jd_id.path.unlink()
+                symlink_path.symlink_to(target.path)
+
+            linked += 1
+
+    click.echo(f"\n{prefix}{linked} linked, {skipped} skipped.")
 
 
 if __name__ == "__main__":
