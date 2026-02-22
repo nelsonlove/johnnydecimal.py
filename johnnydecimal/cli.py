@@ -333,7 +333,7 @@ def validate(fix):
         in_archive = any(re.match(r"\d{2}\.99\b", a.name) for a in orphan.parents)
         if in_archive:
             continue
-        warnings.append(f"ORPHAN: ORPHAN: {orphan}")
+        warnings.append(f"ORPHAN: {orphan}")
 
     # 5. Convention: x0 should be "[Area] - Meta"
     for area in jd.areas:
@@ -354,13 +354,13 @@ def validate(fix):
                     meta_cat.path = new_path
                 else:
                     warnings.append(
-                        f"CONVENTION: CONVENTION: Category {meta_num:02d} should be "
+                        f"CONVENTION: Category {meta_num:02d} should be "
                         f"\"{area.name} - Meta\" but is \"{meta_cat.name}\"\n"
                         f"     {meta_cat.path}"
                     )
         else:
             warnings.append(
-                f"CONVENTION: CONVENTION: Area {area} has no meta category ({meta_num:02d})"
+                f"CONVENTION: Area {area} has no meta category ({meta_num:02d})"
             )
 
     # 6. Convention: xx.00 should exist and be named "[Category] - Meta"
@@ -382,7 +382,7 @@ def validate(fix):
                     fixed.append(f"CONVENTION: Created {meta_path}")
                 else:
                     warnings.append(
-                        f"CONVENTION: CONVENTION: Category {category} missing {meta_id} (category meta)"
+                        f"CONVENTION: Category {category} missing {meta_id} (category meta)"
                     )
             elif meta.name != expected_meta_name:
                 if fix:
@@ -395,7 +395,7 @@ def validate(fix):
                     meta.path = new_path
                 else:
                     warnings.append(
-                        f"CONVENTION: CONVENTION: {meta_id} should be \"{expected_meta_name}\" "
+                        f"CONVENTION: {meta_id} should be \"{expected_meta_name}\" "
                         f"but is \"{meta.name}\"\n     {meta.path}"
                     )
 
@@ -422,7 +422,7 @@ def validate(fix):
                         unsorted.path = new_path
                     else:
                         warnings.append(
-                            f"CONVENTION: CONVENTION: {unsorted_id} should be \"{expected_unsorted_name}\" "
+                            f"CONVENTION: {unsorted_id} should be \"{expected_unsorted_name}\" "
                             f"but is \"{unsorted.name}\"\n     {unsorted.path}"
                         )
             else:
@@ -433,7 +433,7 @@ def validate(fix):
                     fixed.append(f"CONVENTION: Created {unsorted_path}")
                 else:
                     warnings.append(
-                        f"CONVENTION: CONVENTION: Category {category} missing {unsorted_id} {expected_unsorted_name}"
+                        f"CONVENTION: Category {category} missing {unsorted_id} {expected_unsorted_name}"
                     )
 
     # 8. Symlink declarations in policy
@@ -503,6 +503,27 @@ def validate(fix):
                     f"FILE AS ID: {jd_id.id_str} {jd_id.name} is a file, not a directory\n"
                     f"     {jd_id.path}\n"
                     f"     (policy ids_as_files=false)"
+                )
+
+    # 11. Git repos inside the tree (iCloud corruption risk)
+    #     Skip IDs reached through symlinks (e.g. 92 → ~/Repositories) —
+    #     those repos aren't actually in iCloud.
+    root_policy = resolve_policy(jd.path, jd.path)
+    if get_convention(root_policy, "no_git_repos", True):
+        root_real = jd.path.resolve()
+        for jd_id in jd.all_ids():
+            if jd_id.is_file:
+                continue
+            # Skip if any ancestor is a symlink (repo lives outside iCloud)
+            if jd_id.path.resolve() != jd_id.path and \
+               not str(jd_id.path.resolve()).startswith(str(root_real)):
+                continue
+            git_dir = jd_id.path / ".git"
+            if git_dir.exists():
+                issues.append(
+                    f"GIT REPO: {jd_id.id_str} {jd_id.name} contains a .git directory\n"
+                    f"     {jd_id.path}\n"
+                    f"     (git repos in iCloud risk corruption — symlink to an external location)"
                 )
 
     # Print results

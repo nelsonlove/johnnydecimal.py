@@ -20,6 +20,7 @@ DEFAULTS = {
         "unsorted_id": True,         # xx.01 = "Unsorted"
         "ids_files_only": False,     # allow subdirs inside IDs
         "ids_as_files": False,       # allow IDs to be files (not dirs)
+        "no_git_repos": True,        # flag .git dirs (iCloud corruption risk)
         "capture_category": "01",    # which category is the capture inbox
         "naming": {
             "separator": "-",        # hyphen, not en-dash
