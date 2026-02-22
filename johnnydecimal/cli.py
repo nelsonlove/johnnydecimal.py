@@ -269,8 +269,7 @@ def new_category(area, name, explicit_num, init):
         meta_path.mkdir()
         click.echo(f"  + {meta_name}")
 
-        unsorted_suffix = "Unsorted" if next_cat % 10 == 0 else f"{name} - Unsorted"
-        unsorted_name = f"{format_jd_id(next_cat, 1)} {unsorted_suffix}"
+        unsorted_name = f"{format_jd_id(next_cat, 1)} {name} - Unsorted"
         unsorted_path = new_path / unsorted_name
         unsorted_path.mkdir()
         click.echo(f"  + {unsorted_name}")
@@ -365,12 +364,13 @@ def validate(fix):
             )
 
     # 6. Convention: xx.00 should exist and be named "[Category] - Meta"
-    #    (x0 meta categories just get "Meta" since they're already the meta)
     for area in jd.areas:
         for category in area.categories:
             meta_id = format_jd_id(category.number, 0)
-            if category.number % 10 == 0:
-                expected_meta_name = "Meta"
+            if category.number == 0:
+                continue  # 00 Indices is special — skip
+            elif category.number % 10 == 0:
+                expected_meta_name = f"{area.name} - Meta"
             else:
                 expected_meta_name = f"{category.name} - Meta"
             meta = jd.find_by_id(meta_id)
@@ -400,12 +400,13 @@ def validate(fix):
                     )
 
     # 7. Convention: xx.01 should be "[Category] - Unsorted"
-    #    (x0 meta categories just get "Unsorted")
     for area in jd.areas:
         for category in area.categories:
             unsorted_id = format_jd_id(category.number, 1)
-            if category.number % 10 == 0:
-                expected_unsorted_name = "Unsorted"
+            if category.number == 0:
+                continue  # 00 Indices is special — skip
+            elif category.number % 10 == 0:
+                expected_unsorted_name = f"{area.name} - Unsorted"
             else:
                 expected_unsorted_name = f"{category.name} - Unsorted"
             unsorted = jd.find_by_id(unsorted_id)
@@ -979,8 +980,11 @@ def init(category_num, meta, unsorted):
             click.echo(f"  exists: {meta_id}")
 
     if unsorted:
-        unsorted_suffix = "Unsorted" if category_num % 10 == 0 else f"{category.name} - Unsorted"
-        unsorted_name = f"{format_jd_id(category_num, 1)} {unsorted_suffix}"
+        if category_num % 10 == 0:
+            unsorted_base = category.area.name
+        else:
+            unsorted_base = category.name
+        unsorted_name = f"{format_jd_id(category_num, 1)} {unsorted_base} - Unsorted"
         unsorted_path = category.path / unsorted_name
         if not unsorted_path.exists():
             unsorted_path.mkdir()
@@ -1015,8 +1019,11 @@ def init_all(meta, unsorted, dry_run):
                     to_create.append((meta_path, meta_name))
 
             if unsorted:
-                unsorted_suffix = "Unsorted" if category.number % 10 == 0 else f"{category.name} - Unsorted"
-                unsorted_name = f"{format_jd_id(category.number, 1)} {unsorted_suffix}"
+                if category.number % 10 == 0:
+                    unsorted_base = area.name
+                else:
+                    unsorted_base = category.name
+                unsorted_name = f"{format_jd_id(category.number, 1)} {unsorted_base} - Unsorted"
                 unsorted_path = category.path / unsorted_name
                 if not unsorted_path.exists():
                     to_create.append((unsorted_path, unsorted_name))
