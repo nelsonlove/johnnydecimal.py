@@ -20,12 +20,12 @@
 - [x] Agent scoping via `jd.yaml` (per-workspace, env var, scope enforcement on writes)
 - [x] pipx install, pyproject.toml, zsh completions
 - [x] Emoji-free output
+- [x] `jd open` — open JD location in Finder/file manager
 
 ## Next Up
 
 ### CLI
 - [ ] `jd backup` — snapshot the JD tree (metadata, structure, or full) to a tarball or manifest
-- [ ] `jd backup restore` — restore from a backup snapshot
 - [ ] `jd cp` — copy into JD (like mv but keeps original)
 - [ ] `jd renum` — batch renumber within a category
 - [ ] `jd stats` — system-wide statistics (total IDs, sizes, age distribution)
@@ -52,10 +52,6 @@
 ### Agent Integration
 - [ ] Make `jd` an OpenClaw skill so all agents can use it
 - [ ] `jd.json` cached index (faster than filesystem scan every time)
-- [ ] Agent scoping in skill SKILL.md with `JD_AGENT_SCOPE` env var
 
 ### Known Issues
-- [ ] Mom category uses 21.xx numbering (should be 22.xx) — needs `jd renum` batch
-- [ ] Duplicate IDs: 06.15, 13.05, 73.04
-- [ ] 36 file-IDs flagged by validate (mostly in 00 Indices and 62 L7 Informatics)
-- [ ] 17 empty categories (may be archive or merge candidates)
+- [ ] No known issues
