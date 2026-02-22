@@ -277,8 +277,13 @@ def new_category(area, name, explicit_num, init):
 
 @cli.command()
 @click.option("--fix", is_flag=True, help="Auto-fix safe issues (conventions, en-dashes, broken symlinks)")
-def validate(fix):
+@click.option("-n", "--dry-run", is_flag=True, help="With --fix: show what would be changed without changing it")
+def validate(fix, dry_run):
     """Validate the JD filing system for consistency issues."""
+    if dry_run and not fix:
+        click.echo("--dry-run only makes sense with --fix", err=True)
+        raise SystemExit(1)
+    do_fix = fix and not dry_run
     jd = get_root()
     issues = []
     warnings = []
@@ -290,8 +295,9 @@ def validate(fix):
             if fix:
                 new_name = area.path.name.replace("–", "-")
                 new_path = area.path.parent / new_name
-                area.path.rename(new_path)
-                area.path = new_path
+                if do_fix:
+                    area.path.rename(new_path)
+                    area.path = new_path
                 fixed.append(f"STYLE: Renamed {area.path.name}: en-dash → hyphen")
             else:
                 warnings.append(
@@ -315,7 +321,8 @@ def validate(fix):
     # 3. Broken symlinks
     for broken in jd.broken_symlinks:
         if fix:
-            broken.unlink()
+            if do_fix:
+                broken.unlink()
             fixed.append(f"LINK: Removed broken symlink: {broken}")
         else:
             warnings.append(f"LINK: BROKEN SYMLINK: {broken}")
@@ -347,11 +354,12 @@ def validate(fix):
                 if fix:
                     new_name = f"{meta_num:02d} {area.name} - Meta"
                     new_path = meta_cat.path.parent / new_name
-                    meta_cat.path.rename(new_path)
+                    if do_fix:
+                        meta_cat.path.rename(new_path)
+                        meta_cat.path = new_path
                     fixed.append(
                         f"CONVENTION: Renamed {meta_cat.path.name} → {new_name}"
                     )
-                    meta_cat.path = new_path
                 else:
                     warnings.append(
                         f"CONVENTION: Category {meta_num:02d} should be "
@@ -378,7 +386,8 @@ def validate(fix):
                 if fix:
                     meta_name = f"{meta_id} {expected_meta_name}"
                     meta_path = category.path / meta_name
-                    meta_path.mkdir()
+                    if do_fix:
+                        meta_path.mkdir()
                     fixed.append(f"CONVENTION: Created {meta_path}")
                 else:
                     warnings.append(
@@ -388,11 +397,12 @@ def validate(fix):
                 if fix:
                     new_name = f"{meta_id} {expected_meta_name}"
                     new_path = meta.path.parent / new_name
-                    meta.path.rename(new_path)
+                    if do_fix:
+                        meta.path.rename(new_path)
+                        meta.path = new_path
                     fixed.append(
                         f"CONVENTION: Renamed {meta.path.name} → {new_name}"
                     )
-                    meta.path = new_path
                 else:
                     warnings.append(
                         f"CONVENTION: {meta_id} should be \"{expected_meta_name}\" "
@@ -415,11 +425,12 @@ def validate(fix):
                     if fix:
                         new_name = f"{unsorted_id} {expected_unsorted_name}"
                         new_path = unsorted.path.parent / new_name
-                        unsorted.path.rename(new_path)
+                        if do_fix:
+                            unsorted.path.rename(new_path)
+                            unsorted.path = new_path
                         fixed.append(
                             f"CONVENTION: Renamed {unsorted.path.name} → {new_name}"
                         )
-                        unsorted.path = new_path
                     else:
                         warnings.append(
                             f"CONVENTION: {unsorted_id} should be \"{expected_unsorted_name}\" "
@@ -429,7 +440,8 @@ def validate(fix):
                 if fix:
                     unsorted_name = f"{unsorted_id} {expected_unsorted_name}"
                     unsorted_path = category.path / unsorted_name
-                    unsorted_path.mkdir()
+                    if do_fix:
+                        unsorted_path.mkdir()
                     fixed.append(f"CONVENTION: Created {unsorted_path}")
                 else:
                     warnings.append(
@@ -528,7 +540,8 @@ def validate(fix):
 
     # Print results
     if fixed:
-        click.echo("=== FIXED ===")
+        header = "=== WOULD FIX ===" if dry_run else "=== FIXED ==="
+        click.echo(header)
         for f in fixed:
             click.echo(f)
         click.echo()
