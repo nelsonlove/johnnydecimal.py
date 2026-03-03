@@ -2299,14 +2299,13 @@ def omnifocus_scan():
       - Tagged + dead (OF project has JD tag, ID missing from JD)
       - Active IDs without OF project (advisory)
     """
-    from johnnydecimal.omnifocus import list_projects_with_jd_tags, list_folders, OmniFocusError
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, OmniFocusError
 
     jd = get_root()
     _omnifocus_check_enabled(jd)
 
     try:
         projects = list_projects_with_jd_tags()
-        of_folders = list_folders()
     except OmniFocusError as exc:
         click.echo(f"ERROR: Could not read OmniFocus: {exc}", err=True)
         raise SystemExit(1)
@@ -2350,10 +2349,6 @@ def omnifocus_scan():
                                 untracked.append(f"{jd_id.id_str} {jd_id.name}")
                         except PermissionError:
                             pass
-
-    # Report OF folder vs JD area structure (advisory)
-    of_folder_names = {f["name"] for f in of_folders if f["parent_name"] is None}
-    area_names = {str(area) for area in jd.areas}
 
     # Report
     if tagged_found:
@@ -2434,16 +2429,21 @@ def omnifocus_validate():
         from johnnydecimal.omnifocus import _run_jxa_json
         all_projects_script = """\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    JSON.stringify(flattenedProjects.filter(p =>
-        p.status.name === "Active"
-    ).map(p => ({
-        name: p.name,
-        tags: p.tags.map(t => t.name),
-        folder: p.parentFolder ? p.parentFolder.name : null
-    })))
-`);
-result;
+var doc = app.defaultDocument;
+var projects = doc.flattenedProjects();
+var result = [];
+for (var i = 0; i < projects.length; i++) {
+    var p = projects[i];
+    if (p.status().toString() === "active status") {
+        var tagNames = [];
+        var tags = p.tags();
+        for (var j = 0; j < tags.length; j++) tagNames.push(tags[j].name());
+        var folderName = null;
+        try { if (p.parentFolder()) folderName = p.parentFolder().name(); } catch(e) {}
+        result.push({name: p.name(), tags: tagNames, folder: folderName});
+    }
+}
+JSON.stringify(result);
 """
         all_active = _run_jxa_json(all_projects_script)
         for proj in all_active:

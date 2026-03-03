@@ -1,7 +1,7 @@
 """OmniFocus backend via JXA (JavaScript for Automation).
 
-Thin wrapper around osascript -l JavaScript using OmniFocus's
-evaluateJavascript bridge. Each function builds a JXA script,
+Thin wrapper around osascript -l JavaScript using direct JXA API calls
+on OmniFocus's defaultDocument. Each function builds a JXA script,
 runs it via subprocess, and parses the JSON output.
 
 Links to JD via tags: OF projects get JD:xx.xx or JD:xx tags
@@ -49,16 +49,21 @@ def list_jd_tags() -> list[dict]:
     """
     script = """\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    JSON.stringify(flattenedTags.filter(t =>
-        /^JD:\\\\d/.test(t.name)
-    ).map(t => ({
-        name: t.name,
-        id: t.id.primaryKey,
-        remaining_tasks: t.remainingTasks.length
-    })))
-`);
-result;
+var doc = app.defaultDocument;
+var tags = doc.flattenedTags();
+var result = [];
+for (var i = 0; i < tags.length; i++) {
+    var t = tags[i];
+    var name = t.name();
+    if (/^JD:\\d/.test(name)) {
+        result.push({
+            name: name,
+            id: t.id(),
+            remaining_tasks: t.remainingTasks().length
+        });
+    }
+}
+JSON.stringify(result);
 """
     return _run_jxa_json(script)
 
@@ -70,19 +75,33 @@ def list_projects_with_jd_tags() -> list[dict]:
     """
     script = """\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    JSON.stringify(flattenedProjects.filter(p =>
-        p.tags.some(t => /^JD:\\\\d/.test(t.name))
-    ).map(p => ({
-        name: p.name,
-        id: p.id.primaryKey,
-        status: p.status.name,
-        tags: p.tags.map(t => t.name),
-        folder: p.parentFolder ? p.parentFolder.name : null,
-        task_count: p.flattenedTasks.length
-    })))
-`);
-result;
+var doc = app.defaultDocument;
+var projects = doc.flattenedProjects();
+var result = [];
+for (var i = 0; i < projects.length; i++) {
+    var p = projects[i];
+    var tags = p.tags();
+    var hasJD = false;
+    var tagNames = [];
+    for (var j = 0; j < tags.length; j++) {
+        var tname = tags[j].name();
+        tagNames.push(tname);
+        if (/^JD:\\d/.test(tname)) hasJD = true;
+    }
+    if (hasJD) {
+        var folderName = null;
+        try { if (p.parentFolder()) folderName = p.parentFolder().name(); } catch(e) {}
+        result.push({
+            name: p.name(),
+            id: p.id(),
+            status: p.status().toString(),
+            tags: tagNames,
+            folder: folderName,
+            task_count: p.flattenedTasks().length
+        });
+    }
+}
+JSON.stringify(result);
 """
     return _run_jxa_json(script)
 
@@ -94,14 +113,20 @@ def list_folders() -> list[dict]:
     """
     script = """\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    JSON.stringify(flattenedFolders.map(f => ({
-        name: f.name,
-        id: f.id.primaryKey,
-        parent_name: f.parentFolder ? f.parentFolder.name : null
-    })))
-`);
-result;
+var doc = app.defaultDocument;
+var folders = doc.flattenedFolders();
+var result = [];
+for (var i = 0; i < folders.length; i++) {
+    var f = folders[i];
+    var parentName = null;
+    try { if (f.parentFolder()) parentName = f.parentFolder().name(); } catch(e) {}
+    result.push({
+        name: f.name(),
+        id: f.id(),
+        parent_name: parentName
+    });
+}
+JSON.stringify(result);
 """
     return _run_jxa_json(script)
 
@@ -114,18 +139,32 @@ def find_project(name: str) -> dict | None:
     escaped = name.replace('\\', '\\\\').replace('"', '\\"')
     script = f"""\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    var matches = flattenedProjects.filter(p => p.name === "{escaped}");
-    matches.length ? JSON.stringify({{
-        name: matches[0].name,
-        id: matches[0].id.primaryKey,
-        status: matches[0].status.name,
-        tags: matches[0].tags.map(t => t.name),
-        folder: matches[0].parentFolder ? matches[0].parentFolder.name : null,
-        task_count: matches[0].flattenedTasks.length
-    }}) : "null"
-`);
-result;
+var doc = app.defaultDocument;
+var projects = doc.flattenedProjects();
+var found = null;
+for (var i = 0; i < projects.length; i++) {{
+    if (projects[i].name() === "{escaped}") {{
+        found = projects[i];
+        break;
+    }}
+}}
+if (found) {{
+    var tagNames = [];
+    var tags = found.tags();
+    for (var j = 0; j < tags.length; j++) tagNames.push(tags[j].name());
+    var folderName = null;
+    try {{ if (found.parentFolder()) folderName = found.parentFolder().name(); }} catch(e) {{}}
+    JSON.stringify({{
+        name: found.name(),
+        id: found.id(),
+        status: found.status().toString(),
+        tags: tagNames,
+        folder: folderName,
+        task_count: found.flattenedTasks().length
+    }});
+}} else {{
+    'null';
+}}
 """
     raw = _run_jxa(script)
     if not raw or raw == "null":
@@ -148,13 +187,19 @@ def create_tag(tag_name: str):
     escaped = tag_name.replace('\\', '\\\\').replace('"', '\\"')
     script = f"""\
 var app = Application('OmniFocus');
-app.evaluateJavascript(`
-    var existing = flattenedTags.find(t => t.name === "{escaped}");
-    if (!existing) {{
-        var tag = new Tag("{escaped}");
-        library.ending.tags.push(tag);
+var doc = app.defaultDocument;
+var tags = doc.flattenedTags();
+var exists = false;
+for (var i = 0; i < tags.length; i++) {{
+    if (tags[i].name() === "{escaped}") {{
+        exists = true;
+        break;
     }}
-`);
+}}
+if (!exists) {{
+    var tag = app.Tag({{name: "{escaped}"}});
+    doc.tags.push(tag);
+}}
 'ok';
 """
     _run_jxa(script)
@@ -167,34 +212,54 @@ def create_project(name: str, folder: str | None = None, tags: list[str] | None 
     """
     escaped_name = name.replace('\\', '\\\\').replace('"', '\\"')
 
-    folder_js = "null"
+    # Build folder lookup JS
+    folder_js = ""
     if folder:
         escaped_folder = folder.replace('\\', '\\\\').replace('"', '\\"')
-        folder_js = f'flattenedFolders.find(f => f.name === "{escaped_folder}")'
+        folder_js = f"""
+var targetFolder = null;
+var folders = doc.flattenedFolders();
+for (var i = 0; i < folders.length; i++) {{
+    if (folders[i].name() === "{escaped_folder}") {{
+        targetFolder = folders[i];
+        break;
+    }}
+}}
+"""
+    else:
+        folder_js = "var targetFolder = null;\n"
 
-    tags_js = "[]"
+    # Build tag application JS
+    tag_js = ""
     if tags:
-        tag_filters = ", ".join(
-            f'flattenedTags.find(t => t.name === "{t.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}")'
-            for t in tags
-        )
-        tags_js = f"[{tag_filters}].filter(Boolean)"
+        for t in tags:
+            escaped_t = t.replace('\\', '\\\\').replace('"', '\\"')
+            tag_js += f"""
+var tagObj = null;
+var allTags = doc.flattenedTags();
+for (var ti = 0; ti < allTags.length; ti++) {{
+    if (allTags[ti].name() === "{escaped_t}") {{
+        tagObj = allTags[ti];
+        break;
+    }}
+}}
+if (tagObj) {{
+    app.add(tagObj, {{to: proj.tags}});
+}}
+"""
 
     script = f"""\
 var app = Application('OmniFocus');
-var result = app.evaluateJavascript(`
-    var folder = {folder_js};
-    var proj = new Project("{escaped_name}");
-    if (folder) {{
-        folder.ending.projects.push(proj);
-    }} else {{
-        library.ending.projects.push(proj);
-    }}
-    var tagObjs = {tags_js};
-    tagObjs.forEach(function(t) {{ proj.addTag(t); }});
-    JSON.stringify({{ name: proj.name, id: proj.id.primaryKey }})
-`);
-result;
+var doc = app.defaultDocument;
+{folder_js}
+var proj = app.Project({{name: "{escaped_name}"}});
+if (targetFolder) {{
+    targetFolder.projects.push(proj);
+}} else {{
+    doc.projects.push(proj);
+}}
+{tag_js}
+JSON.stringify({{name: proj.name(), id: proj.id()}});
 """
     return _run_jxa_json(script)
 
@@ -205,12 +270,15 @@ def open_project(name: str):
     script = f"""\
 var app = Application('OmniFocus');
 app.activate();
-app.evaluateJavascript(`
-    var proj = flattenedProjects.find(p => p.name === "{escaped}");
-    if (proj) {{
-        document.windows[0].selectObjects([proj]);
+var doc = app.defaultDocument;
+var projects = doc.flattenedProjects();
+for (var i = 0; i < projects.length; i++) {{
+    if (projects[i].name() === "{escaped}") {{
+        var win = doc.documentWindows[0];
+        win.selectedViewModeProjectsSidebar = projects[i];
+        break;
     }}
-`);
+}}
 """
     _run_jxa(script)
 
@@ -221,18 +289,45 @@ def tag_project(project_name: str, tag_name: str):
     escaped_tag = tag_name.replace('\\', '\\\\').replace('"', '\\"')
     script = f"""\
 var app = Application('OmniFocus');
-app.evaluateJavascript(`
-    var proj = flattenedProjects.find(p => p.name === "{escaped_proj}");
-    if (!proj) throw new Error("Project not found: {escaped_proj}");
-    var tag = flattenedTags.find(t => t.name === "{escaped_tag}");
-    if (!tag) {{
-        tag = new Tag("{escaped_tag}");
-        library.ending.tags.push(tag);
+var doc = app.defaultDocument;
+
+// Find project
+var proj = null;
+var projects = doc.flattenedProjects();
+for (var i = 0; i < projects.length; i++) {{
+    if (projects[i].name() === "{escaped_proj}") {{
+        proj = projects[i];
+        break;
     }}
-    if (!proj.tags.some(t => t.name === "{escaped_tag}")) {{
-        proj.addTag(tag);
+}}
+if (!proj) throw new Error("Project not found: {escaped_proj}");
+
+// Find or create tag
+var tag = null;
+var tags = doc.flattenedTags();
+for (var i = 0; i < tags.length; i++) {{
+    if (tags[i].name() === "{escaped_tag}") {{
+        tag = tags[i];
+        break;
     }}
-`);
+}}
+if (!tag) {{
+    tag = app.Tag({{name: "{escaped_tag}"}});
+    doc.tags.push(tag);
+}}
+
+// Add tag if not already present
+var projTags = proj.tags();
+var hasTag = false;
+for (var i = 0; i < projTags.length; i++) {{
+    if (projTags[i].name() === "{escaped_tag}") {{
+        hasTag = true;
+        break;
+    }}
+}}
+if (!hasTag) {{
+    app.add(tag, {{to: proj.tags}});
+}}
 'ok';
 """
     _run_jxa(script)
