@@ -225,7 +225,7 @@ def resolve_policy(path: Path, root: Path) -> dict:
     return effective
 
 
-def _find_root_policy(root: Path) -> Optional[Path]:
+def find_root_policy(root: Path) -> Optional[Path]:
     """
     Find the root-level policy.yaml by walking 00-09 → 00 → 00.00*.
 
@@ -253,7 +253,7 @@ def get_volumes(root: Path) -> dict:
     Returns dict of volume name → {"mount": Path, "root": str}.
     Empty dict if no volumes declared.
     """
-    policy_path = _find_root_policy(root)
+    policy_path = find_root_policy(root)
     if not policy_path:
         return {}
     try:
@@ -268,6 +268,32 @@ def get_volumes(root: Path) -> dict:
         mount = conf.get("mount", "")
         vol_root = conf.get("root", "")
         result[name] = {"mount": Path(mount), "root": vol_root}
+    return result
+
+
+def get_links(root: Path) -> dict[str, list[str]]:
+    """
+    Get declared inbound links from the root-level policy.
+
+    Returns dict of JD ID → list of external paths that should symlink into it.
+    Empty dict if no links declared.
+    """
+    policy_path = find_root_policy(root)
+    if not policy_path:
+        return {}
+    try:
+        with open(policy_path) as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return {}
+
+    links = data.get("links", {})
+    result = {}
+    for jd_id, paths in links.items():
+        if isinstance(paths, list):
+            result[str(jd_id)] = [str(p) for p in paths]
+        elif isinstance(paths, str):
+            result[str(jd_id)] = [paths]
     return result
 
 

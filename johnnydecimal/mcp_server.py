@@ -8,7 +8,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from johnnydecimal import api
-from johnnydecimal.policy import resolve_policy, get_convention, get_volumes
+from johnnydecimal.policy import resolve_policy, get_convention, get_volumes, get_links, find_root_policy
 
 mcp = FastMCP("Johnny Decimal", json_response=True)
 
@@ -1056,6 +1056,220 @@ def jd_generate_index() -> dict:
     index_path.write_text(content)
 
     return {"path": str(index_path), "lines": len(lines)}
+
+
+# ---------------------------------------------------------------------------
+# Symlinks / backup audit
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def jd_symlinks() -> dict:
+    """List every symlink in the JD tree with target location and git status.
+
+    Shows what lives outside iCloud Drive. For git repos, reports whether
+    they have a remote and whether the working tree is clean or dirty.
+    """
+    import subprocess
+
+    jd = _get_root()
+    links = []
+
+    for area in jd.areas:
+        if area.path.is_symlink():
+            try:
+                target = area.path.resolve(strict=True)
+                links.append({"id": str(area), "name": area._name, "target": str(target), "broken": False})
+            except (OSError, FileNotFoundError):
+                links.append({"id": str(area), "name": area._name, "target": str(area.path.readlink()), "broken": True})
+            continue
+
+        for category in area.categories:
+            if category.path.is_symlink():
+                try:
+                    target = category.path.resolve(strict=True)
+                    links.append({"id": f"{category.number:02d}", "name": category.name, "target": str(target), "broken": False})
+                except (OSError, FileNotFoundError):
+                    links.append({"id": f"{category.number:02d}", "name": category.name, "target": str(category.path.readlink()), "broken": True})
+                continue
+
+            for jd_id in category.ids:
+                if jd_id.path.is_symlink():
+                    try:
+                        target = jd_id.path.resolve(strict=True)
+                        links.append({"id": jd_id.id_str, "name": jd_id.name or "(meta)", "target": str(target), "broken": False})
+                    except (OSError, FileNotFoundError):
+                        links.append({"id": jd_id.id_str, "name": jd_id.name or "(meta)", "target": str(jd_id.path.readlink()), "broken": True})
+
+    # Enrich with git status
+    for link in links:
+        if link["broken"]:
+            continue
+        git_dir = Path(link["target"]) / ".git"
+        if not git_dir.exists():
+            continue
+        try:
+            remote = subprocess.run(
+                ["git", "-C", link["target"], "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=5,
+            )
+            dirty = subprocess.run(
+                ["git", "-C", link["target"], "status", "--porcelain"],
+                capture_output=True, text=True, timeout=5,
+            )
+            link["git"] = {
+                "has_remote": remote.returncode == 0,
+                "dirty": bool(dirty.stdout.strip()),
+            }
+        except Exception:
+            pass
+
+    # Group by location
+    groups = {}
+    for link in links:
+        target = Path(link["target"])
+        parts = target.parts
+        if link["broken"]:
+            key = link["target"]
+        elif len(parts) >= 3 and parts[1] == "Volumes":
+            key = f"/Volumes/{parts[2]}"
+        elif len(parts) >= 4 and parts[1] == "Users":
+            key = f"~/{parts[3]}"
+        else:
+            key = str(target.parent)
+        groups.setdefault(key, []).append(link)
+
+    # Inbound links from policy
+    declared = get_links(jd.path)
+    inbound_links = []
+    for jd_id_str, ext_paths in declared.items():
+        target_obj = jd.find_by_id(jd_id_str)
+        if not target_obj:
+            for ext in ext_paths:
+                inbound_links.append({"id": jd_id_str, "source": ext, "status": "id_not_found"})
+            continue
+        for ext in ext_paths:
+            ext_expanded = Path(ext).expanduser()
+            if ext_expanded.is_symlink():
+                actual = ext_expanded.resolve()
+                expected = target_obj.path.resolve()
+                if actual == expected:
+                    inbound_links.append({"id": jd_id_str, "source": ext, "status": "ok"})
+                else:
+                    inbound_links.append({"id": jd_id_str, "source": ext, "status": "wrong_target", "actual": str(actual)})
+            elif ext_expanded.exists():
+                inbound_links.append({"id": jd_id_str, "source": ext, "status": "not_a_symlink"})
+            else:
+                inbound_links.append({"id": jd_id_str, "source": ext, "status": "missing"})
+
+    return {
+        "symlinks": links,
+        "inbound_links": inbound_links,
+        "by_location": {k: [l["id"] for l in v] for k, v in groups.items()},
+        "total": len(links),
+        "broken": sum(1 for l in links if l["broken"]),
+        "no_remote": [l["id"] for l in links if l.get("git", {}).get("has_remote") is False],
+        "dirty": [l["id"] for l in links if l.get("git", {}).get("dirty") is True],
+    }
+
+
+@mcp.tool()
+def jd_ln(source: str, jd_id: str, remove: bool = False) -> dict:
+    """Create or remove an inbound symlink and declare it in policy.
+
+    Creates a symlink at source pointing into the JD tree at jd_id,
+    and records it in policy.yaml so jd_validate tracks it.
+    With remove=True, removes the symlink and policy entry.
+    """
+    import yaml
+
+    jd = _get_root()
+
+    target_obj = jd.find_by_id(jd_id)
+    if not target_obj:
+        return {"error": f"JD ID {jd_id} not found"}
+
+    source_path = Path(source).expanduser()
+
+    if remove:
+        result = {"action": "remove", "source": source, "jd_id": jd_id}
+
+        if source_path.is_symlink():
+            source_path.unlink()
+            result["symlink_removed"] = True
+        elif source_path.exists():
+            return {"error": f"{source} exists but is not a symlink — not removing"}
+        else:
+            result["symlink_removed"] = False  # already gone
+
+        policy_path = find_root_policy(jd.path)
+        if policy_path:
+            with open(policy_path) as f:
+                data = yaml.safe_load(f) or {}
+            links = data.get("links", {})
+            key = None
+            for k in links:
+                if str(k) == jd_id:
+                    key = k
+                    break
+            if key is not None and source in links[key]:
+                links[key].remove(source)
+                if not links[key]:
+                    del links[key]
+                if not links:
+                    data.pop("links", None)
+                with open(policy_path, "w") as f:
+                    yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                result["policy_updated"] = True
+            else:
+                result["policy_updated"] = False
+        return result
+
+    # Create mode
+    if source_path.exists() and not source_path.is_symlink():
+        return {"error": f"{source} exists and is not a symlink — move it first"}
+
+    result = {"action": "create", "source": source, "jd_id": jd_id, "target": str(target_obj.path)}
+
+    if source_path.is_symlink():
+        actual = source_path.resolve()
+        expected = target_obj.path.resolve()
+        if actual == expected:
+            result["symlink_created"] = False  # already correct
+        else:
+            return {"error": f"{source} is a symlink but points to {actual}, expected {expected}"}
+    else:
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.symlink_to(target_obj.path)
+        result["symlink_created"] = True
+
+    # Update policy
+    policy_path = find_root_policy(jd.path)
+    if not policy_path:
+        result["policy_updated"] = False
+        result["warning"] = "No root policy.yaml found"
+        return result
+
+    with open(policy_path) as f:
+        data = yaml.safe_load(f) or {}
+
+    links = data.setdefault("links", {})
+    key = None
+    for k in links:
+        if str(k) == jd_id:
+            key = k
+            break
+    if key is None:
+        key = jd_id
+    if key not in links:
+        links[key] = []
+    if source not in links[key]:
+        links[key].append(source)
+
+    with open(policy_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    result["policy_updated"] = True
+
+    return result
 
 
 # ---------------------------------------------------------------------------
