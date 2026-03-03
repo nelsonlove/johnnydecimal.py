@@ -5,10 +5,13 @@ A command-line tool for managing a [Johnny Decimal](https://johnnydecimal.com) f
 ## Install
 
 ```bash
-pipx install --editable .
+pipx install .
+
+# Optional: MCP server support for AI agents
+pipx inject johnnydecimal mcp
 ```
 
-Requires Python 3.10+ and `pyyaml`. Optional: `tree` (for `jd ls`).
+Requires Python 3.10+ and `pyyaml`. Optional: `tree` (for `jd ls`), `mcp` (for `jd mcp`).
 
 ## Quick Start
 
@@ -26,12 +29,19 @@ jd triage              # show where attention is needed
 
 | Command | Description |
 |---------|-------------|
+| `jd cd <TARGET>` | Change directory to a JD target (ID, category, area, or name) |
 | `jd ls [TARGET]` | List contents using `tree`. Supports `-L` depth, `--area`, `-d` dirs-only |
 | `jd which <ID>` | Resolve a JD ID or category to its filesystem path |
 | `jd search <QUERY>` | Case-insensitive name search. `--archived` includes `.99` dirs |
 | `jd index` | Print the full JD index |
 | `jd json` | Output the full index as JSON (for agent consumption) |
 | `jd root` | Print the root directory of the filing system |
+
+`jd cd` requires a shell wrapper. Run `jd cd --setup` to print it, then add to your `.zshrc`:
+
+```bash
+eval "$(jd cd --setup)"
+```
 
 ### Creating
 
@@ -76,9 +86,23 @@ jd restore --renumber 86.03  # if 86.03 is now taken, assigns next available
 
 | Command | Description |
 |---------|-------------|
-| `jd validate` | Check for duplicates, mismatches, convention violations |
+| `jd validate` | Check for duplicates, mismatches, convention violations. `--fix` auto-fixes, `--dry-run` previews |
 | `jd triage` | Show busiest unsorted dirs, file-IDs, empty categories |
 | `jd generate-index` | Regenerate `00.00/Index.md` from the filesystem |
+
+Validate follows symlinks into mounted external drives and checks them too.
+
+### External Volumes
+
+Manage content on external drives (declared in `policy.yaml`):
+
+| Command | Description |
+|---------|-------------|
+| `jd volume list` | List declared volumes with mount status and alias counts |
+| `jd volume scan` | Report aliases, symlinks, broken links, and undeclared references per volume |
+| `jd volume index [NAME]` | Generate a `tree` index of a mounted volume and save to `00.02` |
+
+Volume aliases are files named like `86.05 Music software [Extreme SSD]`. When the drive is mounted, `jd volume link` converts them to symlinks.
 
 ### Policy
 
@@ -135,6 +159,52 @@ Resolution order:
 1. `JD_AGENT_SCOPE` environment variable (path to scope file)
 2. `./jd.yaml` in current working directory
 3. No scope file = unrestricted
+
+## MCP Server
+
+An MCP server exposes the full JD API to AI agents (Claude Code, claude.ai, etc.):
+
+```bash
+# Install with MCP support
+pipx install .
+pipx inject johnnydecimal mcp
+
+# Run the server (stdio transport)
+jd mcp
+```
+
+### Claude Code
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "jd": {
+      "command": "jd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Tools
+
+The MCP server provides 19 tools covering navigation, creation, moving, archiving, validation, volume management, and policy. Key tools:
+
+| Tool | Description |
+|------|-------------|
+| `jd_index` | Full JD index |
+| `jd_find` | Resolve an ID to its path |
+| `jd_search` | Search entries by name |
+| `jd_ls` | Tree listing of a target |
+| `jd_new_id` / `jd_new_category` | Create new entries |
+| `jd_move` | Move, rename, renumber, or archive |
+| `jd_validate` | Run validation with cross-volume checks |
+| `jd_volume_list` / `jd_volume_scan` | External drive management |
+| `jd_policy` / `jd_policy_set` | Read and write policy |
+
+Resources: `jd://tree` (full index), `jd://policy` (effective policy).
 
 ## Shell Completion
 
