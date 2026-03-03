@@ -319,8 +319,18 @@ def validate(fix, dry_run):
             )
 
     # 3. Broken symlinks
+    #    Distinguish volume symlinks (pointing to /Volumes) from truly broken ones.
+    #    Volume symlinks are expected to break when the drive is unmounted — never auto-delete them.
     for broken in jd.broken_symlinks:
-        if fix:
+        raw_target = str(broken.readlink())
+        if raw_target.startswith("/Volumes"):
+            # Extract volume name from path like /Volumes/LaCie SSD/...
+            vol_name = Path(raw_target).parts[2] if len(Path(raw_target).parts) > 2 else raw_target
+            warnings.append(
+                f"VOLUME: UNMOUNTED: {broken.name} → {raw_target}\n"
+                f"     volume '{vol_name}' is not mounted (this is expected when the drive is disconnected)"
+            )
+        elif fix:
             if do_fix:
                 broken.unlink()
             fixed.append(f"LINK: Removed broken symlink: {broken}")
@@ -500,13 +510,20 @@ def validate(fix, dry_run):
         if jd_id.is_file:
             # Check if this is a volume reference (alias file with [Volume Name])
             vol_match = re.match(r"\d{2}\.\d{2} .+ \[(.+)\]$", jd_id.path.name)
-            if vol_match and vol_match.group(1) in volume_names:
-                vol_name = vol_match.group(1)
-                warnings.append(
-                    f"VOLUME: {jd_id.id_str} {jd_id.name} is an alias for {vol_name}\n"
-                    f"     {jd_id.path}\n"
-                    f"     (run 'jd volume link' to convert to symlink)"
-                )
+            if vol_match:
+                ref_name = vol_match.group(1)
+                if ref_name in volume_names:
+                    warnings.append(
+                        f"VOLUME: {jd_id.id_str} {jd_id.name} is an alias for {ref_name}\n"
+                        f"     {jd_id.path}\n"
+                        f"     (run 'jd volume link' to convert to symlink)"
+                    )
+                else:
+                    warnings.append(
+                        f"VOLUME: UNDECLARED: {jd_id.id_str} {jd_id.name} references unknown volume '{ref_name}'\n"
+                        f"     {jd_id.path}\n"
+                        f"     (add '{ref_name}' to policy.yaml under 'volumes:' to manage it)"
+                    )
                 continue
 
             policy = resolve_policy(jd_id.path.parent, jd.path)
@@ -537,6 +554,102 @@ def validate(fix, dry_run):
                     f"     {jd_id.path}\n"
                     f"     (git repos in iCloud risk corruption — symlink to an external location)"
                 )
+
+    # 12. Cross-volume validation — check mounted external drives
+    volumes = volumes if volumes else get_volumes(jd.path)
+    for vol_name, conf in volumes.items():
+        mount = conf["mount"]
+        vol_root_suffix = conf["root"]
+        if not mount.exists():
+            continue  # already reported as VOLUME: UNMOUNTED if symlinked
+
+        tree_root = mount / vol_root_suffix if vol_root_suffix else mount
+        if not tree_root.is_dir():
+            warnings.append(
+                f"VOLUME: Cannot find {tree_root}\n"
+                f"     (check the 'root' setting in policy.yaml)"
+            )
+            continue
+
+        # Use JDSystem directly — volumes may have fewer than 3 areas
+        # (the normal api.get_system() requires 3+ areas)
+        from johnnydecimal.models import JDSystem
+        try:
+            vol_jd = JDSystem(tree_root)
+        except Exception:
+            warnings.append(
+                f"VOLUME: Cannot load JD tree on {vol_name} at {tree_root}\n"
+                f"     (check the 'root' setting in policy.yaml)"
+            )
+            continue
+        if not vol_jd.areas:
+            warnings.append(
+                f"VOLUME: No JD areas found on {vol_name} at {tree_root}\n"
+                f"     (expected area directories like '80-89 Media')"
+            )
+            continue
+
+        # 12a. Duplicate IDs within the volume
+        for id_str, path1, path2 in vol_jd.find_duplicates():
+            issues.append(
+                f"[{vol_name}] DUPLICATE ID {id_str}:\n"
+                f"     {path1}\n     {path2}"
+            )
+
+        # 12b. Mismatched category prefixes on the volume
+        for jd_id in vol_jd.all_ids():
+            if jd_id.is_mismatched:
+                issues.append(
+                    f"[{vol_name}] MISMATCHED PREFIX: {jd_id.id_str} is inside category "
+                    f"{jd_id.category.number:02d} ({jd_id.category.name})\n"
+                    f"     {jd_id.path}"
+                )
+
+        # 12c. Orphan directories on the volume
+        for orphan in vol_jd.find_orphans():
+            parent_cat = orphan.parent.name[:2] if orphan.parent else ""
+            if parent_cat == "01":
+                continue
+            warnings.append(
+                f"[{vol_name}] ORPHAN: {orphan.name}\n     {orphan}"
+            )
+
+        # 12d. Cross-check: aliases in main tree should match content on the volume
+        for jd_id in jd.all_ids():
+            if jd_id.path.is_symlink() or jd_id.path.is_dir():
+                continue
+            m = re.match(r"\d{2}\.\d{2} .+ \[(.+)\]$", jd_id.path.name)
+            if m and m.group(1) == vol_name:
+                # This alias references this volume — check if the ID exists there
+                vol_target = vol_jd.find_by_id(jd_id.id_str)
+                if not vol_target:
+                    warnings.append(
+                        f"[{vol_name}] ALIAS MISMATCH: {jd_id.id_str} {jd_id.name} "
+                        f"references this volume but ID not found on drive"
+                    )
+
+        # 12e. Cross-check: linked symlinks should resolve to valid IDs on the volume
+        for jd_id in jd.all_ids():
+            if not jd_id.path.is_symlink():
+                continue
+            try:
+                target = jd_id.path.resolve(strict=True)
+                if str(target).startswith(str(mount)):
+                    vol_target = vol_jd.find_by_id(jd_id.id_str)
+                    if not vol_target:
+                        warnings.append(
+                            f"[{vol_name}] LINK MISMATCH: {jd_id.id_str} symlinks into "
+                            f"{vol_name} but ID not found in volume's JD tree"
+                        )
+                    elif vol_target.path.resolve() != target:
+                        warnings.append(
+                            f"[{vol_name}] LINK MISMATCH: {jd_id.id_str} points to {target}\n"
+                            f"     but volume's JD tree has {vol_target.path}"
+                        )
+            except (OSError, FileNotFoundError):
+                pass  # broken symlinks already handled in section 3
+
+        click.echo(f"Validated volume: {vol_name} ({tree_root})")
 
     # Print results
     if fixed:
@@ -1498,6 +1611,212 @@ def volume_link(dry_run):
     click.echo(f"\n{prefix}{linked} linked, {skipped} skipped.")
 
 
+@volume.command("scan")
+def volume_scan():
+    """Scan the tree for volume references and show their status.
+
+    Reports:
+    - Alias files waiting to be linked (per volume)
+    - Already-linked symlinks pointing to volume mount paths
+    - Broken symlinks that were previously linked
+    - Undeclared volume names (aliases referencing unknown volumes)
+    """
+    jd = get_root()
+    volumes = get_volumes(jd.path)
+    volume_names = set(volumes.keys())
+
+    aliases = []      # (jd_id, vol_name) — alias files for declared volumes
+    linked = []       # (jd_id, vol_name) — symlinks pointing into a volume mount
+    broken = []       # (jd_id, target) — broken symlinks that pointed to /Volumes
+    undeclared = {}   # vol_name → [jd_id] — aliases for undeclared volume names
+
+    for jd_id in jd.all_ids():
+        # Check symlinks: already linked or broken
+        if jd_id.path.is_symlink():
+            try:
+                target = jd_id.path.resolve(strict=True)
+                target_str = str(target)
+                for vname, conf in volumes.items():
+                    if target_str.startswith(str(conf["mount"])):
+                        linked.append((jd_id, vname))
+                        break
+            except (OSError, FileNotFoundError):
+                raw_target = jd_id.path.readlink()
+                if str(raw_target).startswith("/Volumes"):
+                    broken.append((jd_id, raw_target))
+            continue
+
+        # Check alias files: [Volume Name] suffix
+        if jd_id.path.is_dir():
+            continue
+        m = re.match(r"\d{2}\.\d{2} .+ \[(.+)\]$", jd_id.path.name)
+        if m:
+            ref_name = m.group(1)
+            if ref_name in volume_names:
+                aliases.append((jd_id, ref_name))
+            else:
+                undeclared.setdefault(ref_name, []).append(jd_id)
+
+    # Group aliases by volume
+    alias_by_vol = {}
+    for jd_id, vname in aliases:
+        alias_by_vol.setdefault(vname, []).append(jd_id)
+
+    linked_by_vol = {}
+    for jd_id, vname in linked:
+        linked_by_vol.setdefault(vname, []).append(jd_id)
+
+    # Report per declared volume
+    for vname, conf in volumes.items():
+        mount = conf["mount"]
+        mounted = mount.exists()
+        status = "mounted" if mounted else "not mounted"
+        vol_aliases = alias_by_vol.get(vname, [])
+        vol_linked = linked_by_vol.get(vname, [])
+
+        click.echo(f"{vname} ({status})")
+
+        if vol_aliases:
+            click.echo(f"  {len(vol_aliases)} alias(es) — waiting to link:")
+            for jd_id in vol_aliases:
+                click.echo(f"    {jd_id.id_str} {jd_id.name}")
+            if mounted:
+                click.echo(f"  → run: jd volume link")
+
+        if vol_linked:
+            click.echo(f"  {len(vol_linked)} linked:")
+            for jd_id in vol_linked:
+                click.echo(f"    {jd_id.id_str} {jd_id.name}")
+
+        if not vol_aliases and not vol_linked:
+            click.echo(f"  no references")
+
+        click.echo()
+
+    # Broken volume symlinks
+    if broken:
+        click.echo(f"BROKEN ({len(broken)} symlinks to /Volumes):")
+        for jd_id, target in broken:
+            click.echo(f"  {jd_id.id_str} {jd_id.name} → {target}")
+        click.echo()
+
+    # Undeclared volumes
+    if undeclared:
+        click.echo(f"UNDECLARED ({len(undeclared)} volume names not in policy):")
+        for ref_name, ids in undeclared.items():
+            click.echo(f"  [{ref_name}] ({len(ids)} IDs)")
+            for jd_id in ids:
+                click.echo(f"    {jd_id.id_str} {jd_id.name}")
+        click.echo("  → add these to policy.yaml under 'volumes:' to manage them")
+        click.echo()
+
+    # Summary
+    click.echo(f"Total: {len(aliases)} aliases, {len(linked)} linked, {len(broken)} broken")
+
+
+def _find_index_dir(jd):
+    """Find or create the external drives index directory (00.02)."""
+    # Look for an existing 00.02 dir (External drives / similar)
+    cat_00 = jd.find_by_category(0)
+    if cat_00:
+        for jd_id in cat_00.ids:
+            if jd_id.sequence == 2:
+                return jd_id.path
+
+        # Create 00.02 if it doesn't exist
+        new_path = cat_00.path / "00.02 External drives"
+        new_path.mkdir(exist_ok=True)
+        return new_path
+
+    return None
+
+
+@volume.command("index")
+@click.argument("name", required=False)
+def volume_index(name):
+    """Generate a tree index for a mounted external volume.
+
+    Saves to 00.02 External drives/Index ({name}).txt.
+    Without NAME, indexes all mounted volumes.
+    """
+    import subprocess
+
+    jd = get_root()
+    volumes = get_volumes(jd.path)
+
+    if not volumes:
+        click.echo("No volumes declared in root policy.yaml.")
+        return
+
+    index_dir = _find_index_dir(jd)
+    if not index_dir:
+        click.echo("Cannot find or create index directory (00.02).", err=True)
+        raise SystemExit(1)
+
+    if name:
+        if name not in volumes:
+            click.echo(f"Unknown volume: {name}", err=True)
+            click.echo(f"Declared volumes: {', '.join(volumes.keys())}")
+            raise SystemExit(1)
+        targets = {name: volumes[name]}
+    else:
+        targets = volumes
+
+    for vol_name, conf in targets.items():
+        mount = conf["mount"]
+        vol_root = conf["root"]
+
+        if not mount.exists():
+            click.echo(f"{vol_name}: skipped — not mounted ({mount})")
+            continue
+
+        tree_root = mount / vol_root if vol_root else mount
+        if not tree_root.exists():
+            click.echo(f"{vol_name}: skipped — root path not found ({tree_root})")
+            continue
+
+        output_file = index_dir / f"Index ({vol_name}).txt"
+
+        click.echo(f"{vol_name}: indexing {tree_root} ...")
+        result = subprocess.run(
+            ["tree", "-I", ".DS_Store|.git|__pycache__|.Trash|.Spotlight-V100|.fseventsd",
+             str(tree_root)],
+            capture_output=True, text=True,
+        )
+
+        if result.returncode != 0:
+            click.echo(f"  ERROR: tree failed: {result.stderr.strip()}", err=True)
+            continue
+
+        output_file.write_text(result.stdout)
+        lines = result.stdout.count("\n")
+        size_kb = len(result.stdout.encode()) / 1024
+        click.echo(f"  → {output_file}")
+        click.echo(f"    {lines:,} lines, {size_kb:,.0f} KB")
+
+
+@cli.command("mcp")
+def mcp_cmd():
+    """Start the Johnny Decimal MCP server (stdio transport).
+
+    Configure in Claude settings:
+
+        \b
+        {
+          "mcpServers": {
+            "jd": { "command": "jd", "args": ["mcp"] }
+          }
+        }
+    """
+    try:
+        from johnnydecimal.mcp_server import run
+    except ImportError:
+        click.echo("MCP server requires the 'mcp' package.", err=True)
+        click.echo("Install with: pip install 'johnnydecimal[mcp]'", err=True)
+        raise SystemExit(1)
+    run()
+
+
 if __name__ == "__main__":
     cli()
 
@@ -1682,3 +2001,117 @@ def open_cmd(target):
         subprocess.run(["xdg-open", str(path)])
     else:
         click.echo(str(path))
+
+
+def _resolve_target(jd, target):
+    """Resolve a JD target string to a path.
+
+    Tries in order: dotted ID, area range, category number, area number, name search.
+    """
+    # Try as dotted ID (e.g. 26.01)
+    result = jd.find_by_id(target)
+    if result:
+        return result.path
+
+    # Try as area range (e.g. "20-29")
+    match = re.match(r"^(\d{2})[-–](\d{2})$", target)
+    if match:
+        num = int(match.group(1))
+        for area in jd.areas:
+            if area._number == num:
+                return area.path
+
+    # Try as category number (e.g. 26)
+    try:
+        result = jd.find_by_category(int(target))
+        if result:
+            return result.path
+    except ValueError:
+        pass
+
+    # Try as area start number (e.g. 20 → 20-29 area) — fallback when no category matches
+    try:
+        num = int(target)
+        for area in jd.areas:
+            if area._number == num:
+                return area.path
+    except ValueError:
+        pass
+
+    # Name search (case-insensitive) — matches completion-inserted names
+    target_lower = target.lower()
+    matches = []
+    for area in jd.areas:
+        if area._name.lower() == target_lower:
+            matches.append(("area", str(area), area.path))
+        for category in area.categories:
+            if category.name.lower() == target_lower:
+                matches.append(("category", str(category), category.path))
+            for jd_id in category.ids:
+                if jd_id.name and jd_id.name.lower() == target_lower:
+                    matches.append(("id", jd_id.id_str, jd_id.path))
+
+    if len(matches) == 1:
+        return matches[0][2]
+    if len(matches) > 1:
+        click.echo("Ambiguous name, matches:", err=True)
+        for kind, label, path in matches:
+            click.echo(f"  {label}", err=True)
+        raise SystemExit(1)
+
+    return None
+
+
+@cli.command("cd")
+@click.argument("target", required=False, type=JD_ID)
+@click.option("--setup", is_flag=True, hidden=True,
+              help="Print shell wrapper function for jd cd.")
+def cd_cmd(target, setup):
+    """Print the path to a JD location (use with shell wrapper to cd).
+
+    TARGET can be a JD ID (26.01), category (26), area (20-29), or name (Recipes).
+
+    Shell setup — add to your .zshrc:
+
+        \b
+        jd() {
+          if [[ "$1" == "cd" ]]; then
+            shift
+            local target
+            target=$(command jd cd "$@")
+            if [[ $? -eq 0 && -n "$target" ]]; then
+              builtin cd "$target"
+            fi
+          else
+            command jd "$@"
+          fi
+        }
+    """
+    if setup:
+        click.echo("""\
+jd() {
+  if [[ "$1" == "cd" ]]; then
+    shift
+    local target
+    target=$(command jd cd "$@")
+    if [[ $? -eq 0 && -n "$target" ]]; then
+      builtin cd "$target"
+    fi
+  else
+    command jd "$@"
+  fi
+}""")
+        return
+
+    if not target:
+        click.echo("Usage: jd cd TARGET", err=True)
+        raise SystemExit(1)
+
+    jd = get_root()
+    path = _resolve_target(jd, target)
+
+    if not path:
+        click.echo(f"{target} not found.", err=True)
+        raise SystemExit(1)
+
+    click.echo(str(path))
