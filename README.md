@@ -92,6 +92,27 @@ jd restore --renumber 86.03  # if 86.03 is now taken, assigns next available
 
 Validate follows symlinks into mounted external drives and checks them too.
 
+### Symlinks & Inbound Links
+
+| Command | Description |
+|---------|-------------|
+| `jd symlinks` | Show all symlinks in the tree grouped by location, with git status |
+| `jd symlinks --check` | Exit 1 if any inbound link is missing or wrong |
+| `jd symlinks --fix` | Create missing inbound symlinks |
+| `jd ln <SOURCE> <ID>` | Create an inbound symlink and declare it in policy |
+| `jd ln --remove <SOURCE> <ID>` | Remove an inbound symlink and its policy entry |
+
+Inbound links are external paths (e.g. `~/.ssh`) that symlink *into* the JD tree. Declare them in `policy.yaml` under `links:` so `jd validate` tracks them:
+
+```yaml
+links:
+  "06.05":
+    - ~/.ssh
+    - ~/.gnupg
+```
+
+`jd ln` creates the symlink and adds the policy entry in one step. `jd validate --fix` creates any missing inbound symlinks.
+
 ### External Volumes
 
 Manage content on external drives (declared in `policy.yaml`):
@@ -190,7 +211,7 @@ Add to your Claude Code MCP config:
 
 ### Tools
 
-The MCP server provides 19 tools covering navigation, creation, moving, archiving, validation, volume management, and policy. Key tools:
+The MCP server provides 21 tools covering navigation, creation, moving, archiving, validation, symlinks, volume management, and policy. Key tools:
 
 | Tool | Description |
 |------|-------------|
@@ -200,7 +221,9 @@ The MCP server provides 19 tools covering navigation, creation, moving, archivin
 | `jd_ls` | Tree listing of a target |
 | `jd_new_id` / `jd_new_category` | Create new entries |
 | `jd_move` | Move, rename, renumber, or archive |
-| `jd_validate` | Run validation with cross-volume checks |
+| `jd_validate` | Run validation with cross-volume and inbound link checks |
+| `jd_symlinks` | List all symlinks with git status and inbound link state |
+| `jd_ln` | Create/remove inbound symlinks and update policy |
 | `jd_volume_list` / `jd_volume_scan` | External drive management |
 | `jd_policy` / `jd_policy_set` | Read and write policy |
 
