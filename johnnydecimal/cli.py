@@ -2261,6 +2261,343 @@ def notes_open(id_str):
         raise SystemExit(1)
 
 
+# ---------------------------------------------------------------------------
+# OmniFocus integration
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def omnifocus():
+    """OmniFocus integration — scan, validate, open, tag, create."""
+    pass
+
+
+def _omnifocus_check_enabled(jd):
+    """Check if OmniFocus integration is enabled. Exits if disabled."""
+    from johnnydecimal.policy import is_omnifocus_enabled
+    if not is_omnifocus_enabled(jd.path):
+        click.echo("OmniFocus integration is disabled (omnifocus: false in root policy.yaml).", err=True)
+        raise SystemExit(1)
+
+
+def _parse_jd_tags(tags: list[str]) -> list[str]:
+    """Extract JD IDs from tag names. E.g. ['JD:26.05', 'Work'] -> ['26.05']."""
+    import re
+    result = []
+    for tag in tags:
+        m = re.match(r"^JD:(\d{2}(?:\.\d{2})?)$", tag)
+        if m:
+            result.append(m.group(1))
+    return result
+
+
+@omnifocus.command("scan")
+def omnifocus_scan():
+    """Compare JD tags in OmniFocus against the JD tree.
+
+    Reports three buckets:
+      - Tagged + found (OF project has JD tag, ID exists in JD)
+      - Tagged + dead (OF project has JD tag, ID missing from JD)
+      - Active IDs without OF project (advisory)
+    """
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, list_folders, OmniFocusError
+
+    jd = get_root()
+    _omnifocus_check_enabled(jd)
+
+    try:
+        projects = list_projects_with_jd_tags()
+        of_folders = list_folders()
+    except OmniFocusError as exc:
+        click.echo(f"ERROR: Could not read OmniFocus: {exc}", err=True)
+        raise SystemExit(1)
+
+    tagged_found = []
+    tagged_dead = []
+
+    # Track which JD IDs have OF projects
+    of_tracked_ids = set()
+
+    for proj in projects:
+        jd_ids = _parse_jd_tags(proj["tags"])
+        for jd_id_str in jd_ids:
+            jd_id = jd.find_by_id(jd_id_str) if "." in jd_id_str else None
+            cat = jd.find_by_category(int(jd_id_str)) if "." not in jd_id_str else None
+
+            if jd_id or cat:
+                tagged_found.append(
+                    f"{jd_id_str}  ←  {proj['name']}"
+                    + (f"  ({proj['folder']})" if proj.get("folder") else "")
+                )
+                of_tracked_ids.add(jd_id_str)
+            else:
+                tagged_dead.append(
+                    f"{jd_id_str}  ←  {proj['name']} (ID not in JD tree)"
+                )
+
+    # Find active JD IDs without OF projects (advisory)
+    untracked = []
+    for area in jd.areas:
+        for cat in area.categories:
+            for jd_id in cat.ids:
+                if jd_id.sequence in (0, 1, 99):
+                    continue
+                if jd_id.id_str not in of_tracked_ids:
+                    # Only report IDs with actual content
+                    if jd_id.path.is_dir():
+                        try:
+                            items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
+                            if items:
+                                untracked.append(f"{jd_id.id_str} {jd_id.name}")
+                        except PermissionError:
+                            pass
+
+    # Report OF folder vs JD area structure (advisory)
+    of_folder_names = {f["name"] for f in of_folders if f["parent_name"] is None}
+    area_names = {str(area) for area in jd.areas}
+
+    # Report
+    if tagged_found:
+        click.echo(f"\nTagged + found ({len(tagged_found)}):")
+        for item in sorted(tagged_found):
+            click.echo(f"  ✓ {item}")
+
+    if tagged_dead:
+        click.echo(f"\nTagged + dead ({len(tagged_dead)}):")
+        for item in sorted(tagged_dead):
+            click.echo(f"  ✗ {item}")
+
+    if untracked:
+        click.echo(f"\nActive IDs without OF project ({len(untracked)}):")
+        for item in sorted(untracked):
+            click.echo(f"  ? {item}")
+
+    if not tagged_found and not tagged_dead and not untracked:
+        click.echo("No OmniFocus projects with JD tags found.")
+
+
+@omnifocus.command("validate")
+def omnifocus_validate():
+    """Check consistency between OmniFocus and the JD tree.
+
+    Validates:
+      1. OF projects with JD tags → does the tagged ID exist?
+      2. Active JD IDs → is there an OF project? (advisory)
+      3. Orphan OF projects → no JD tag (advisory)
+      4. OF folder structure → matches JD areas? (advisory)
+    """
+    from johnnydecimal.omnifocus import (
+        list_projects_with_jd_tags, list_folders, OmniFocusError,
+    )
+
+    jd = get_root()
+    _omnifocus_check_enabled(jd)
+
+    try:
+        projects = list_projects_with_jd_tags()
+        of_folders = list_folders()
+    except OmniFocusError as exc:
+        click.echo(f"ERROR: Could not read OmniFocus: {exc}", err=True)
+        raise SystemExit(1)
+
+    issues = []
+    warnings = []
+
+    # 1. Check JD tags point to valid IDs
+    of_tracked_ids = set()
+    for proj in projects:
+        jd_ids = _parse_jd_tags(proj["tags"])
+        for jd_id_str in jd_ids:
+            jd_id = jd.find_by_id(jd_id_str) if "." in jd_id_str else None
+            cat = jd.find_by_category(int(jd_id_str)) if "." not in jd_id_str else None
+            if jd_id or cat:
+                of_tracked_ids.add(jd_id_str)
+            else:
+                issues.append(f"OF project '{proj['name']}' has tag JD:{jd_id_str} but ID not found in JD tree")
+
+    # 2. Active IDs without OF projects (advisory)
+    for area in jd.areas:
+        for cat in area.categories:
+            for jd_id in cat.ids:
+                if jd_id.sequence in (0, 1, 99):
+                    continue
+                if jd_id.id_str not in of_tracked_ids:
+                    if jd_id.path.is_dir():
+                        try:
+                            items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
+                            if items:
+                                warnings.append(f"{jd_id.id_str} {jd_id.name}: active ID with no OF project")
+                        except PermissionError:
+                            pass
+
+    # 3. All OF projects, check for orphans (no JD tag at all)
+    try:
+        from johnnydecimal.omnifocus import _run_jxa_json
+        all_projects_script = """\
+var app = Application('OmniFocus');
+var result = app.evaluateJavascript(`
+    JSON.stringify(flattenedProjects.filter(p =>
+        p.status.name === "Active"
+    ).map(p => ({
+        name: p.name,
+        tags: p.tags.map(t => t.name),
+        folder: p.parentFolder ? p.parentFolder.name : null
+    })))
+`);
+result;
+"""
+        all_active = _run_jxa_json(all_projects_script)
+        for proj in all_active:
+            jd_ids = _parse_jd_tags(proj["tags"])
+            if not jd_ids:
+                warnings.append(
+                    f"OF project '{proj['name']}' has no JD tag"
+                    + (f" (in {proj['folder']})" if proj.get("folder") else "")
+                )
+    except OmniFocusError:
+        pass  # Non-critical
+
+    # 4. OF folder structure vs JD areas (advisory)
+    top_folders = {f["name"] for f in of_folders if f["parent_name"] is None}
+    for area in jd.areas:
+        area_name = area._name
+        if not any(area_name.lower() in f.lower() for f in top_folders):
+            warnings.append(f"JD area '{area}' has no matching OF top-level folder")
+
+    # Report
+    if issues:
+        click.echo(f"\nIssues ({len(issues)}):")
+        for issue in issues:
+            click.echo(f"  ✗ {issue}")
+    if warnings:
+        click.echo(f"\nWarnings ({len(warnings)}):")
+        for warning in warnings:
+            click.echo(f"  ! {warning}")
+    if not issues and not warnings:
+        click.echo("OmniFocus and JD tree are consistent.")
+
+    if issues:
+        raise SystemExit(1)
+
+
+@omnifocus.command("open")
+@click.argument("id_str", type=JD_ID)
+def omnifocus_open(id_str):
+    """Open the OmniFocus project tagged with a JD ID.
+
+    \b
+    Example:
+        jd omnifocus open 26.05  → opens OF project tagged JD:26.05
+    """
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, open_project, OmniFocusError
+
+    jd = get_root()
+    _omnifocus_check_enabled(jd)
+
+    try:
+        projects = list_projects_with_jd_tags()
+    except OmniFocusError as exc:
+        click.echo(f"ERROR: Could not read OmniFocus: {exc}", err=True)
+        raise SystemExit(1)
+
+    # Find projects tagged with this ID
+    tag_name = f"JD:{id_str}"
+    matches = [p for p in projects if tag_name in p["tags"]]
+
+    if not matches:
+        click.echo(f"No OmniFocus project tagged with {tag_name}.", err=True)
+        raise SystemExit(1)
+
+    if len(matches) == 1:
+        try:
+            open_project(matches[0]["name"])
+            click.echo(f"Opened: {matches[0]['name']}")
+        except OmniFocusError as exc:
+            click.echo(f"ERROR: {exc}", err=True)
+            raise SystemExit(1)
+    else:
+        click.echo(f"Multiple projects tagged {tag_name}:")
+        for proj in matches:
+            folder = f" ({proj['folder']})" if proj.get("folder") else ""
+            click.echo(f"  {proj['name']}{folder}")
+
+
+@omnifocus.command("tag")
+@click.argument("id_str", type=JD_ID)
+def omnifocus_tag(id_str):
+    """Create a JD:xx.xx tag in OmniFocus for a JD ID.
+
+    \b
+    Example:
+        jd omnifocus tag 26.05  → creates JD:26.05 tag in OF
+    """
+    from johnnydecimal.omnifocus import create_tag, OmniFocusError
+
+    jd = get_root()
+    _omnifocus_check_enabled(jd)
+
+    # Validate ID exists in JD tree
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+        raise SystemExit(1)
+
+    tag_name = f"JD:{id_str}"
+    try:
+        create_tag(tag_name)
+        click.echo(f"Created tag: {tag_name}")
+    except OmniFocusError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        raise SystemExit(1)
+
+
+@omnifocus.command("create")
+@click.argument("id_str", type=JD_ID)
+@click.option("--folder", "folder_name", default=None, help="Place project in this OF folder.")
+def omnifocus_create(id_str, folder_name):
+    """Create an OmniFocus project for a JD ID with a JD tag.
+
+    \b
+    Examples:
+        jd omnifocus create 26.05              → create "26.05 Sourdough" with JD:26.05 tag
+        jd omnifocus create 26.05 --folder Recipes  → place in OF folder "Recipes"
+    """
+    from johnnydecimal.omnifocus import create_tag, create_project, OmniFocusError
+
+    jd = get_root()
+    _omnifocus_check_enabled(jd)
+
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+        raise SystemExit(1)
+
+    project_name = str(jd_id)
+    tag_name = f"JD:{id_str}"
+
+    try:
+        # Ensure tag exists
+        create_tag(tag_name)
+
+        # If no folder specified, try to match JD area name against OF folders
+        if not folder_name:
+            from johnnydecimal.omnifocus import list_folders
+            of_folders = list_folders()
+            area_name = jd_id.category.parent._name
+            for f in of_folders:
+                if area_name.lower() in f["name"].lower():
+                    folder_name = f["name"]
+                    break
+
+        result = create_project(project_name, folder=folder_name, tags=[tag_name])
+        click.echo(f"Created project: {project_name}")
+        if folder_name:
+            click.echo(f"  Folder: {folder_name}")
+        click.echo(f"  Tag: {tag_name}")
+    except OmniFocusError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        raise SystemExit(1)
+
+
 @cli.command("mcp")
 def mcp_cmd():
     """Start the Johnny Decimal MCP server (stdio transport).

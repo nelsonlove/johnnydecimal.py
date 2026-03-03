@@ -1590,6 +1590,227 @@ def jd_notes_open(id_str: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# OmniFocus tools
+# ---------------------------------------------------------------------------
+
+def _parse_jd_tags(tags: list[str]) -> list[str]:
+    """Extract JD IDs from tag names. E.g. ['JD:26.05', 'Work'] -> ['26.05']."""
+    result = []
+    for tag in tags:
+        m = re.match(r"^JD:(\d{2}(?:\.\d{2})?)$", tag)
+        if m:
+            result.append(m.group(1))
+    return result
+
+
+@mcp.tool()
+def jd_omnifocus_scan() -> dict:
+    """Scan OmniFocus for JD-tagged projects and compare against the JD tree.
+
+    Returns three buckets:
+      - tagged_found: OF projects with valid JD tags
+      - tagged_dead: OF projects with JD tags pointing to nonexistent IDs
+      - untracked: active JD IDs with content but no OF project
+    """
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, OmniFocusError
+    from johnnydecimal.policy import is_omnifocus_enabled
+
+    jd = _get_root()
+    if not is_omnifocus_enabled(jd.path):
+        return {"error": "OmniFocus integration disabled (omnifocus: false in root policy.yaml)"}
+
+    try:
+        projects = list_projects_with_jd_tags()
+    except OmniFocusError as exc:
+        return {"error": str(exc)}
+
+    tagged_found = []
+    tagged_dead = []
+    of_tracked_ids = set()
+
+    for proj in projects:
+        jd_ids = _parse_jd_tags(proj["tags"])
+        for jd_id_str in jd_ids:
+            jd_id = jd.find_by_id(jd_id_str) if "." in jd_id_str else None
+            cat = jd.find_by_category(int(jd_id_str)) if "." not in jd_id_str else None
+            entry = {"jd_id": jd_id_str, "project": proj["name"],
+                     "folder": proj.get("folder"), "status": proj.get("status")}
+            if jd_id or cat:
+                tagged_found.append(entry)
+                of_tracked_ids.add(jd_id_str)
+            else:
+                tagged_dead.append(entry)
+
+    untracked = []
+    for area in jd.areas:
+        for cat in area.categories:
+            for jd_id in cat.ids:
+                if jd_id.sequence in (0, 1, 99):
+                    continue
+                if jd_id.id_str not in of_tracked_ids:
+                    if jd_id.path.is_dir():
+                        try:
+                            items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
+                            if items:
+                                untracked.append({"id": jd_id.id_str, "name": jd_id.name})
+                        except PermissionError:
+                            pass
+
+    return {
+        "error": None,
+        "tagged_found": tagged_found,
+        "tagged_dead": tagged_dead,
+        "untracked": untracked,
+    }
+
+
+@mcp.tool()
+def jd_omnifocus_validate() -> dict:
+    """Check consistency between OmniFocus and the JD tree.
+
+    Returns issues (errors) and warnings (advisory):
+      1. OF projects with invalid JD tags (issue)
+      2. Active JD IDs without OF projects (warning)
+      3. Orphan OF projects without JD tags (warning)
+      4. OF folder structure vs JD areas (warning)
+    """
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, list_folders, OmniFocusError
+    from johnnydecimal.policy import is_omnifocus_enabled
+
+    jd = _get_root()
+    if not is_omnifocus_enabled(jd.path):
+        return {"error": "OmniFocus integration disabled"}
+
+    try:
+        projects = list_projects_with_jd_tags()
+        of_folders = list_folders()
+    except OmniFocusError as exc:
+        return {"error": str(exc)}
+
+    issues = []
+    warnings = []
+    of_tracked_ids = set()
+
+    for proj in projects:
+        jd_ids = _parse_jd_tags(proj["tags"])
+        for jd_id_str in jd_ids:
+            jd_id = jd.find_by_id(jd_id_str) if "." in jd_id_str else None
+            cat = jd.find_by_category(int(jd_id_str)) if "." not in jd_id_str else None
+            if jd_id or cat:
+                of_tracked_ids.add(jd_id_str)
+            else:
+                issues.append({"project": proj["name"], "tag": f"JD:{jd_id_str}",
+                               "message": "Tag points to nonexistent JD ID"})
+
+    for area in jd.areas:
+        for cat in area.categories:
+            for jd_id in cat.ids:
+                if jd_id.sequence in (0, 1, 99):
+                    continue
+                if jd_id.id_str not in of_tracked_ids:
+                    if jd_id.path.is_dir():
+                        try:
+                            items = [i for i in jd_id.path.iterdir() if not i.name.startswith(".")]
+                            if items:
+                                warnings.append({"id": jd_id.id_str, "name": jd_id.name,
+                                                 "message": "Active ID with no OF project"})
+                        except PermissionError:
+                            pass
+
+    top_folders = {f["name"] for f in of_folders if f["parent_name"] is None}
+    for area in jd.areas:
+        area_name = area._name
+        if not any(area_name.lower() in f.lower() for f in top_folders):
+            warnings.append({"area": str(area),
+                             "message": "No matching OF top-level folder"})
+
+    return {"issues": issues, "warnings": warnings}
+
+
+@mcp.tool()
+def jd_omnifocus_open(id_str: str) -> dict:
+    """Open the OmniFocus project tagged with a JD ID.
+
+    Finds OF projects with the JD:xx.xx tag and opens in OmniFocus.
+    """
+    from johnnydecimal.omnifocus import list_projects_with_jd_tags, open_project, OmniFocusError
+    from johnnydecimal.policy import is_omnifocus_enabled
+
+    jd = _get_root()
+    if not is_omnifocus_enabled(jd.path):
+        return {"error": "OmniFocus integration disabled"}
+
+    tag_name = f"JD:{id_str}"
+
+    try:
+        projects = list_projects_with_jd_tags()
+    except OmniFocusError as exc:
+        return {"error": str(exc)}
+
+    matches = [p for p in projects if tag_name in p["tags"]]
+    if not matches:
+        return {"error": f"No OmniFocus project tagged with {tag_name}"}
+
+    if len(matches) == 1:
+        try:
+            open_project(matches[0]["name"])
+            return {"opened": matches[0]["name"], "error": None}
+        except OmniFocusError as exc:
+            return {"error": str(exc)}
+
+    return {
+        "error": "Multiple projects found",
+        "matches": [{"name": p["name"], "folder": p.get("folder")} for p in matches],
+    }
+
+
+@mcp.tool()
+def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
+    """Create an OmniFocus project for a JD ID with a JD tag.
+
+    Automatically creates the JD:xx.xx tag and tries to match the JD area
+    to an OF folder if no folder is specified.
+    """
+    from johnnydecimal.omnifocus import (
+        create_tag, create_project, list_folders, OmniFocusError,
+    )
+    from johnnydecimal.policy import is_omnifocus_enabled
+
+    jd = _get_root()
+    if not is_omnifocus_enabled(jd.path):
+        return {"error": "OmniFocus integration disabled"}
+
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        return {"error": f"ID {id_str} not found"}
+
+    project_name = str(jd_id)
+    tag_name = f"JD:{id_str}"
+    result = {"id": id_str, "project": project_name, "created": [], "error": None}
+
+    try:
+        create_tag(tag_name)
+        result["created"].append(f"tag:{tag_name}")
+
+        if not folder:
+            of_folders = list_folders()
+            area_name = jd_id.category.parent._name
+            for f in of_folders:
+                if area_name.lower() in f["name"].lower():
+                    folder = f["name"]
+                    break
+
+        create_project(project_name, folder=folder, tags=[tag_name])
+        result["created"].append(f"project:{project_name}")
+        if folder:
+            result["folder"] = folder
+    except OmniFocusError as exc:
+        result["error"] = str(exc)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

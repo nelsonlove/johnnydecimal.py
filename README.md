@@ -154,6 +154,20 @@ location: Apple Notes
 path: 20-29 Projects > 26 Recipes > 26.05 Sourdough
 ```
 
+### OmniFocus
+
+Manage the link between OmniFocus projects and JD locations via `JD:xx.xx` tags. Requires macOS with OmniFocus installed.
+
+| Command | Description |
+|---------|-------------|
+| `jd omnifocus scan` | Compare JD tags in OmniFocus against the JD tree |
+| `jd omnifocus validate` | Check consistency: dead tags, orphan projects, area mismatches |
+| `jd omnifocus open <ID>` | Open the OmniFocus project tagged with a JD ID |
+| `jd omnifocus tag <ID>` | Create a `JD:xx.xx` tag in OmniFocus |
+| `jd omnifocus create <ID>` | Create an OF project named after the JD ID, with tag. `--folder NAME` |
+
+OmniFocus projects link to JD via tags (`JD:26.05` or `JD:26`), not mirrored folder structure. One OF project can reference multiple JD IDs. Disable with `omnifocus: false` in root `policy.yaml`.
+
 ### Policy
 
 Cascading policy files (`.johnnydecimal.yaml`) control conventions at any level of the tree. Most specific wins, like `.editorconfig`.
@@ -240,7 +254,7 @@ Add to your Claude Code MCP config:
 
 ### Tools
 
-The MCP server provides 25 tools covering navigation, creation, moving, archiving, validation, symlinks, volume management, Apple Notes, and policy. Key tools:
+The MCP server provides 29 tools covering navigation, creation, moving, archiving, validation, symlinks, volume management, Apple Notes, OmniFocus, and policy. Key tools:
 
 | Tool | Description |
 |------|-------------|
@@ -256,6 +270,8 @@ The MCP server provides 25 tools covering navigation, creation, moving, archivin
 | `jd_volume_list` / `jd_volume_scan` | External drive management |
 | `jd_notes_scan` / `jd_notes_validate` | Apple Notes scan and consistency checks |
 | `jd_notes_create` / `jd_notes_open` | Create notes/folders and open in Notes.app |
+| `jd_omnifocus_scan` / `jd_omnifocus_validate` | OmniFocus scan and consistency checks |
+| `jd_omnifocus_create` / `jd_omnifocus_open` | Create OF projects with JD tags, open in OmniFocus |
 | `jd_policy` / `jd_policy_set` | Read and write policy |
 
 Resources: `jd://tree` (full index), `jd://policy` (effective policy).

@@ -342,6 +342,22 @@ def is_notes_declared(root: Path, jd_id_str: str) -> bool:
     return jd_id_str in val
 
 
+def is_omnifocus_enabled(root: Path) -> bool:
+    """Check if OmniFocus integration is enabled.
+
+    Returns True unless the root policy explicitly sets omnifocus: false.
+    """
+    policy_path = find_root_policy(root)
+    if not policy_path:
+        return True
+    try:
+        with open(policy_path) as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return True
+    return data.get("omnifocus", True) is not False
+
+
 def get_convention(policy: dict, key: str, default: Any = None) -> Any:
     """Get a convention value from a resolved policy."""
     conventions = policy.get("conventions", {})
