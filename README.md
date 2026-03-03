@@ -125,6 +125,35 @@ Manage content on external drives (declared in `policy.yaml`):
 
 Volume aliases are files named like `86.05 Music software [Extreme SSD]`. When the drive is mounted, `jd volume link` converts them to symlinks.
 
+### Apple Notes
+
+Manage JD IDs that live in Apple Notes instead of the filesystem. Requires macOS.
+
+| Command | Description |
+|---------|-------------|
+| `jd notes scan` | Compare Apple Notes folders against JD tree and policy declarations |
+| `jd notes validate` | Check consistency between stubs, Notes, and policy |
+| `jd notes stub <ID>` | Create a YAML stub file marking an ID as Notes-backed |
+| `jd notes create <ID>` | Create a note/folder in Apple Notes for a JD ID. `--folder`, `--stub` |
+| `jd notes open <ID>` | Open a note in Notes.app |
+
+Declare Notes-backed IDs in root `policy.yaml`:
+
+```yaml
+notes:
+  "26":
+    - "26.05"
+    - "26.12"
+  "11": all    # entire category is Notes-backed
+```
+
+Stubs are YAML files like `26.05 Sourdough [Apple Notes].yaml` that sit in the category directory. They are recognized by `jd validate` (skipped in step 10) and contain:
+
+```yaml
+location: Apple Notes
+path: 20-29 Projects > 26 Recipes > 26.05 Sourdough
+```
+
 ### Policy
 
 Cascading policy files (`.johnnydecimal.yaml`) control conventions at any level of the tree. Most specific wins, like `.editorconfig`.
@@ -211,7 +240,7 @@ Add to your Claude Code MCP config:
 
 ### Tools
 
-The MCP server provides 21 tools covering navigation, creation, moving, archiving, validation, symlinks, volume management, and policy. Key tools:
+The MCP server provides 25 tools covering navigation, creation, moving, archiving, validation, symlinks, volume management, Apple Notes, and policy. Key tools:
 
 | Tool | Description |
 |------|-------------|
@@ -225,6 +254,8 @@ The MCP server provides 21 tools covering navigation, creation, moving, archivin
 | `jd_symlinks` | List all symlinks with git status and inbound link state |
 | `jd_ln` | Create/remove inbound symlinks and update policy |
 | `jd_volume_list` / `jd_volume_scan` | External drive management |
+| `jd_notes_scan` / `jd_notes_validate` | Apple Notes scan and consistency checks |
+| `jd_notes_create` / `jd_notes_open` | Create notes/folders and open in Notes.app |
 | `jd_policy` / `jd_policy_set` | Read and write policy |
 
 Resources: `jd://tree` (full index), `jd://policy` (effective policy).

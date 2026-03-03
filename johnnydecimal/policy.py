@@ -297,6 +297,51 @@ def get_links(root: Path) -> dict[str, list[str]]:
     return result
 
 
+def get_notes_declarations(root: Path) -> dict[str, list[str] | str]:
+    """Get declared Apple Notes-backed IDs from the root-level policy.
+
+    Returns dict of category number → list of ID suffixes or "all".
+    E.g. {"26": ["26.05", "26.12"], "11": "all"}
+    Empty dict if no notes declared.
+    """
+    policy_path = find_root_policy(root)
+    if not policy_path:
+        return {}
+    try:
+        with open(policy_path) as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return {}
+
+    notes = data.get("notes", {})
+    result: dict[str, list[str] | str] = {}
+    for cat, ids in notes.items():
+        cat_str = str(cat)
+        if ids == "all":
+            result[cat_str] = "all"
+        elif isinstance(ids, list):
+            result[cat_str] = [str(i) for i in ids]
+        elif isinstance(ids, str):
+            result[cat_str] = [ids]
+    return result
+
+
+def is_notes_declared(root: Path, jd_id_str: str) -> bool:
+    """Check if a JD ID is declared as Notes-backed in policy."""
+    import re
+    m = re.match(r"(\d{2})\.(\d{2})", jd_id_str)
+    if not m:
+        return False
+    cat = m.group(1)
+    declarations = get_notes_declarations(root)
+    if cat not in declarations:
+        return False
+    val = declarations[cat]
+    if val == "all":
+        return True
+    return jd_id_str in val
+
+
 def get_convention(policy: dict, key: str, default: Any = None) -> Any:
     """Get a convention value from a resolved policy."""
     conventions = policy.get("conventions", {})

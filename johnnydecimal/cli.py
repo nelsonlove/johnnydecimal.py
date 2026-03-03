@@ -569,6 +569,11 @@ def validate(fix, dry_run, force):
                     )
                 continue
 
+            # Check if this is an Apple Notes stub (handled by jd notes validate)
+            notes_match = re.match(r"\d{2}\.\d{2} .+ \[Apple Notes\]", jd_id.path.name)
+            if notes_match:
+                continue
+
             policy = resolve_policy(jd_id.path.parent, jd.path)
             if not get_convention(policy, "ids_as_files", False):
                 issues.append(
@@ -1836,6 +1841,424 @@ def volume_index(name):
         size_kb = len(result.stdout.encode()) / 1024
         click.echo(f"  → {output_file}")
         click.echo(f"    {lines:,} lines, {size_kb:,.0f} KB")
+
+
+# ---------------------------------------------------------------------------
+# Apple Notes integration
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def notes():
+    """Apple Notes integration — scan, validate, stub, create, open."""
+    pass
+
+
+def _notes_folder_path(jd, jd_id_obj):
+    """Build the Notes folder path segments for a JD ID.
+
+    Returns e.g. ["20-29 Projects", "26 Recipes"] for an ID in category 26.
+    """
+    area = jd_id_obj.category.parent
+    return [str(area), str(jd_id_obj.category)]
+
+
+def _notes_id_display(jd_id_obj):
+    """Human-readable note name: '26.05 Sourdough'."""
+    return str(jd_id_obj)
+
+
+@notes.command("scan")
+def notes_scan():
+    """Scan Apple Notes for JD-matching folders and compare against policy.
+
+    Reports three buckets:
+      - Declared + found (in policy and exists in Notes)
+      - Declared + missing (in policy but not in Notes)
+      - Undeclared matches (in Notes with JD naming but not in policy)
+    """
+    from johnnydecimal.notes import build_tree, NotesError
+    from johnnydecimal.policy import get_notes_declarations
+
+    jd = get_root()
+    declarations = get_notes_declarations(jd.path)
+
+    if not declarations:
+        click.echo("No notes declarations in root policy.yaml.")
+        click.echo("Add a 'notes:' section to declare Notes-backed IDs.")
+        return
+
+    try:
+        tree = build_tree()
+    except NotesError as exc:
+        click.echo(f"ERROR: Could not read Apple Notes: {exc}", err=True)
+        raise SystemExit(1)
+
+    declared_found = []
+    declared_missing = []
+    undeclared = []
+
+    # Check declared IDs
+    for cat_str, ids in declarations.items():
+        cat_num = int(cat_str)
+        cat = jd.find_by_category(cat_num)
+        if not cat:
+            click.echo(f"WARNING: Declared category {cat_str} not found in JD tree.", err=True)
+            continue
+
+        area = cat.parent
+        area_name = str(area)
+        cat_name = str(cat)
+
+        # Check if area folder exists in Notes
+        area_tree = tree.get(area_name, {})
+        cat_tree = area_tree.get("folders", {}).get(cat_name, {})
+
+        if ids == "all":
+            # All IDs in this category should be in Notes
+            for jd_id in cat.ids:
+                note_name = _notes_id_display(jd_id)
+                notes_list = cat_tree.get("notes", [])
+                if note_name in notes_list:
+                    declared_found.append(f"{jd_id.id_str} {jd_id.name}")
+                else:
+                    declared_missing.append(f"{jd_id.id_str} {jd_id.name}")
+        else:
+            for id_str in ids:
+                jd_id = jd.find_by_id(str(id_str))
+                if not jd_id:
+                    declared_missing.append(f"{id_str} (ID not found in tree)")
+                    continue
+                note_name = _notes_id_display(jd_id)
+                notes_list = cat_tree.get("notes", [])
+                if note_name in notes_list:
+                    declared_found.append(f"{jd_id.id_str} {jd_id.name}")
+                else:
+                    declared_missing.append(f"{jd_id.id_str} {jd_id.name}")
+
+    # Scan Notes for undeclared JD matches
+    for area_name, area_data in tree.items():
+        area_match = re.match(r"(\d{2})[-–](\d{2}) ", area_name)
+        if not area_match:
+            continue
+        for cat_name, cat_data in area_data.get("folders", {}).items():
+            cat_match = re.match(r"(\d{2}) ", cat_name)
+            if not cat_match:
+                continue
+            cat_str = cat_match.group(1)
+            for note_name in cat_data.get("notes", []):
+                id_match = re.match(r"(\d{2}\.\d{2})", note_name)
+                if not id_match:
+                    continue
+                id_str = id_match.group(1)
+                # Skip if declared
+                if cat_str in declarations:
+                    val = declarations[cat_str]
+                    if val == "all" or id_str in val:
+                        continue
+                undeclared.append(f"{id_str} {note_name}  (in {area_name} > {cat_name})")
+
+    # Report
+    if declared_found:
+        click.echo(f"\nDeclared + found ({len(declared_found)}):")
+        for item in sorted(declared_found):
+            click.echo(f"  ✓ {item}")
+
+    if declared_missing:
+        click.echo(f"\nDeclared + missing ({len(declared_missing)}):")
+        for item in sorted(declared_missing):
+            click.echo(f"  ✗ {item}")
+
+    if undeclared:
+        click.echo(f"\nUndeclared matches ({len(undeclared)}):")
+        for item in sorted(undeclared):
+            click.echo(f"  ? {item}")
+
+    if not declared_found and not declared_missing and not undeclared:
+        click.echo("No matches found.")
+
+
+@notes.command("validate")
+def notes_validate():
+    """Check consistency between Notes stubs, Apple Notes, and policy.
+
+    Validates for declared Notes-backed IDs:
+      - Stub file exists in filesystem ↔ note exists in Notes
+      - Stub YAML path matches actual Notes location
+      - No duplicate IDs (same ID as directory AND in Notes)
+    """
+    from johnnydecimal.notes import note_exists, folder_exists, NotesError
+    from johnnydecimal.policy import get_notes_declarations
+
+    jd = get_root()
+    declarations = get_notes_declarations(jd.path)
+
+    if not declarations:
+        click.echo("No notes declarations in root policy.yaml.")
+        return
+
+    issues = []
+    warnings = []
+
+    for cat_str, ids in declarations.items():
+        cat_num = int(cat_str)
+        cat = jd.find_by_category(cat_num)
+        if not cat:
+            warnings.append(f"Category {cat_str}: not found in JD tree")
+            continue
+
+        area = cat.parent
+        area_folder = [str(area)]
+        cat_folder = [str(area), str(cat)]
+
+        # Check area + category folders exist in Notes
+        try:
+            if not folder_exists(area_folder):
+                warnings.append(f"Category {cat_str}: area folder '{area}' missing in Notes")
+            if not folder_exists(cat_folder):
+                warnings.append(f"Category {cat_str}: category folder '{cat}' missing in Notes")
+        except NotesError as exc:
+            issues.append(f"Category {cat_str}: Notes error: {exc}")
+            continue
+
+        # Determine which IDs to check
+        if ids == "all":
+            id_list = [jd_id.id_str for jd_id in cat.ids]
+        else:
+            id_list = [str(i) for i in ids]
+
+        for id_str in id_list:
+            jd_id = jd.find_by_id(str(id_str))
+            if not jd_id:
+                warnings.append(f"{id_str}: declared in policy but not found in JD tree")
+                continue
+
+            note_name = _notes_id_display(jd_id)
+
+            # Check stub file exists
+            stub_pattern = re.compile(
+                rf"{re.escape(jd_id.id_str)} .+ \[Apple Notes\]\.(yaml|yml)$"
+            )
+            stub_files = [
+                f for f in jd_id.category.path.iterdir()
+                if stub_pattern.match(f.name)
+            ]
+
+            # Check note exists in Notes
+            try:
+                has_note = note_exists(cat_folder, note_name)
+            except NotesError:
+                has_note = None  # Can't check
+
+            # Check for directory-based ID (conflict)
+            if jd_id.path.is_dir():
+                issues.append(
+                    f"{jd_id.id_str}: exists as directory AND declared as Notes-backed\n"
+                    f"     {jd_id.path}"
+                )
+
+            if stub_files and has_note is False:
+                issues.append(
+                    f"{jd_id.id_str}: stub exists but note missing in Notes\n"
+                    f"     stub: {stub_files[0].name}"
+                )
+            elif not stub_files and has_note is True:
+                warnings.append(
+                    f"{jd_id.id_str}: note exists in Notes but no stub file\n"
+                    f"     (run 'jd notes stub {jd_id.id_str}' to create)"
+                )
+
+            # Validate stub YAML content if stub exists
+            if stub_files:
+                import yaml
+                try:
+                    with open(stub_files[0]) as f:
+                        stub_data = yaml.safe_load(f) or {}
+                    expected_path = " > ".join(cat_folder + [note_name])
+                    actual_path = stub_data.get("path", "")
+                    if actual_path != expected_path:
+                        warnings.append(
+                            f"{jd_id.id_str}: stub path mismatch\n"
+                            f"     expected: {expected_path}\n"
+                            f"     actual:   {actual_path}"
+                        )
+                except (yaml.YAMLError, OSError):
+                    warnings.append(f"{jd_id.id_str}: could not read stub YAML")
+
+    # Report
+    if issues:
+        click.echo(f"\nIssues ({len(issues)}):")
+        for issue in issues:
+            click.echo(f"  ✗ {issue}")
+    if warnings:
+        click.echo(f"\nWarnings ({len(warnings)}):")
+        for warning in warnings:
+            click.echo(f"  ! {warning}")
+    if not issues and not warnings:
+        click.echo("All Notes declarations are consistent.")
+
+    if issues:
+        raise SystemExit(1)
+
+
+@notes.command("stub")
+@click.argument("id_str", type=JD_ID)
+def notes_stub(id_str):
+    """Create a YAML stub file for a Notes-backed ID.
+
+    The stub marks this ID as living in Apple Notes rather than the filesystem.
+
+    \b
+    Example:
+        jd notes stub 26.05  → creates 26.05 Sourdough [Apple Notes].yaml
+    """
+    import yaml
+    from johnnydecimal.notes import note_exists, NotesError
+
+    jd = get_root()
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+        raise SystemExit(1)
+
+    area = jd_id.category.parent
+    cat_folder = [str(area), str(jd_id.category)]
+    note_name = _notes_id_display(jd_id)
+    notes_path = " > ".join(cat_folder + [note_name])
+
+    # Verify note exists in Notes
+    try:
+        if not note_exists(cat_folder, note_name):
+            click.echo(
+                f"WARNING: Note '{note_name}' not found in Notes.\n"
+                f"  Expected in: {' > '.join(cat_folder)}\n"
+                f"  Creating stub anyway."
+            )
+    except NotesError as exc:
+        click.echo(f"WARNING: Could not check Notes: {exc}")
+
+    # Create stub file
+    stub_name = f"{jd_id.id_str} {jd_id.name} [Apple Notes].yaml"
+    stub_path = jd_id.category.path / stub_name
+
+    if stub_path.exists():
+        click.echo(f"Stub already exists: {stub_name}")
+        return
+
+    stub_data = {
+        "location": "Apple Notes",
+        "path": notes_path,
+    }
+    with open(stub_path, "w") as f:
+        yaml.dump(stub_data, f, default_flow_style=False, sort_keys=False)
+
+    click.echo(f"Created: {stub_name}")
+
+
+@notes.command("create")
+@click.argument("id_str", type=JD_ID)
+@click.option("--folder", is_flag=True, help="Create a folder instead of a note.")
+@click.option("--stub", is_flag=True, help="Also create a filesystem stub.")
+def notes_create(id_str, folder, stub):
+    """Create a note (or folder) in Apple Notes for a JD ID.
+
+    Ensures area and category folders exist, then creates the note.
+
+    \b
+    Examples:
+        jd notes create 26.05          → create note "26.05 Sourdough"
+        jd notes create 26.05 --stub   → also create stub file
+        jd notes create 26.05 --folder → create folder instead of note
+    """
+    import yaml
+    from johnnydecimal.notes import (
+        create_folder, create_note, folder_exists, note_exists, NotesError,
+    )
+
+    jd = get_root()
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+        raise SystemExit(1)
+
+    area = jd_id.category.parent
+    area_folder = [str(area)]
+    cat_folder = [str(area), str(jd_id.category)]
+    note_name = _notes_id_display(jd_id)
+
+    try:
+        # Ensure area folder exists
+        if not folder_exists(area_folder):
+            create_folder(area_folder)
+            click.echo(f"Created folder: {area}")
+
+        # Ensure category folder exists
+        if not folder_exists(cat_folder):
+            create_folder(cat_folder)
+            click.echo(f"Created folder: {jd_id.category}")
+
+        if folder:
+            # Create subfolder for the ID
+            id_folder = cat_folder + [note_name]
+            if folder_exists(id_folder):
+                click.echo(f"Folder already exists: {note_name}")
+            else:
+                create_folder(id_folder)
+                click.echo(f"Created folder: {note_name}")
+        else:
+            # Create note
+            if note_exists(cat_folder, note_name):
+                click.echo(f"Note already exists: {note_name}")
+            else:
+                create_note(cat_folder, note_name)
+                click.echo(f"Created note: {note_name}")
+    except NotesError as exc:
+        click.echo(f"ERROR: {exc}", err=True)
+        raise SystemExit(1)
+
+    # Optionally create stub
+    if stub:
+        notes_path = " > ".join(cat_folder + [note_name])
+        stub_name = f"{jd_id.id_str} {jd_id.name} [Apple Notes].yaml"
+        stub_path = jd_id.category.path / stub_name
+        if stub_path.exists():
+            click.echo(f"Stub already exists: {stub_name}")
+        else:
+            stub_data = {
+                "location": "Apple Notes",
+                "path": notes_path,
+            }
+            with open(stub_path, "w") as f:
+                yaml.dump(stub_data, f, default_flow_style=False, sort_keys=False)
+            click.echo(f"Created stub: {stub_name}")
+
+
+@notes.command("open")
+@click.argument("id_str", type=JD_ID)
+def notes_open(id_str):
+    """Open a note in Apple Notes.
+
+    \b
+    Example:
+        jd notes open 26.05  → opens "26.05 Sourdough" in Notes.app
+    """
+    from johnnydecimal.notes import open_note, NotesError
+
+    jd = get_root()
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+        raise SystemExit(1)
+
+    area = jd_id.category.parent
+    cat_folder = [str(area), str(jd_id.category)]
+    note_name = _notes_id_display(jd_id)
+
+    try:
+        open_note(cat_folder, note_name)
+        click.echo(f"Opened: {note_name}")
+    except NotesError as exc:
+        click.echo(f"ERROR: Could not open note: {exc}", err=True)
+        raise SystemExit(1)
 
 
 @cli.command("mcp")

@@ -1332,6 +1332,264 @@ def jd_ln(source: str, jd_id: str, remove: bool = False) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Apple Notes tools
+# ---------------------------------------------------------------------------
+
+def _notes_id_display(jd_id_obj):
+    """Human-readable note name: '26.05 Sourdough'."""
+    return str(jd_id_obj)
+
+
+@mcp.tool()
+def jd_notes_scan() -> dict:
+    """Scan Apple Notes for JD-matching folders and compare against policy.
+
+    Returns three buckets:
+      - declared_found: in policy and exists in Notes
+      - declared_missing: in policy but not in Notes
+      - undeclared: in Notes with JD naming but not in policy
+    """
+    from johnnydecimal.notes import build_tree, NotesError
+    from johnnydecimal.policy import get_notes_declarations
+
+    jd = _get_root()
+    declarations = get_notes_declarations(jd.path)
+
+    if not declarations:
+        return {"error": None, "declared_found": [], "declared_missing": [], "undeclared": [],
+                "message": "No notes declarations in root policy.yaml"}
+
+    try:
+        tree = build_tree()
+    except NotesError as exc:
+        return {"error": str(exc)}
+
+    declared_found = []
+    declared_missing = []
+    undeclared = []
+
+    for cat_str, ids in declarations.items():
+        cat_num = int(cat_str)
+        cat = jd.find_by_category(cat_num)
+        if not cat:
+            continue
+
+        area = cat.parent
+        area_name = str(area)
+        cat_name = str(cat)
+        area_tree = tree.get(area_name, {})
+        cat_tree = area_tree.get("folders", {}).get(cat_name, {})
+
+        if ids == "all":
+            for jd_id in cat.ids:
+                note_name = _notes_id_display(jd_id)
+                notes_list = cat_tree.get("notes", [])
+                entry = {"id": jd_id.id_str, "name": jd_id.name}
+                if note_name in notes_list:
+                    declared_found.append(entry)
+                else:
+                    declared_missing.append(entry)
+        else:
+            for id_str in ids:
+                jd_id = jd.find_by_id(str(id_str))
+                if not jd_id:
+                    declared_missing.append({"id": str(id_str), "name": "(not found)"})
+                    continue
+                note_name = _notes_id_display(jd_id)
+                notes_list = cat_tree.get("notes", [])
+                entry = {"id": jd_id.id_str, "name": jd_id.name}
+                if note_name in notes_list:
+                    declared_found.append(entry)
+                else:
+                    declared_missing.append(entry)
+
+    # Scan for undeclared JD matches
+    for area_name, area_data in tree.items():
+        area_match = re.match(r"(\d{2})[-–](\d{2}) ", area_name)
+        if not area_match:
+            continue
+        for cat_name, cat_data in area_data.get("folders", {}).items():
+            cat_match = re.match(r"(\d{2}) ", cat_name)
+            if not cat_match:
+                continue
+            cat_str = cat_match.group(1)
+            for note_name in cat_data.get("notes", []):
+                id_match = re.match(r"(\d{2}\.\d{2})", note_name)
+                if not id_match:
+                    continue
+                id_str = id_match.group(1)
+                if cat_str in declarations:
+                    val = declarations[cat_str]
+                    if val == "all" or id_str in val:
+                        continue
+                undeclared.append({"id": id_str, "name": note_name,
+                                   "location": f"{area_name} > {cat_name}"})
+
+    return {
+        "error": None,
+        "declared_found": declared_found,
+        "declared_missing": declared_missing,
+        "undeclared": undeclared,
+    }
+
+
+@mcp.tool()
+def jd_notes_validate() -> dict:
+    """Check consistency between Notes stubs, Apple Notes, and policy.
+
+    Returns lists of issues and warnings for declared Notes-backed IDs.
+    """
+    from johnnydecimal.notes import note_exists, folder_exists, NotesError
+    from johnnydecimal.policy import get_notes_declarations
+
+    jd = _get_root()
+    declarations = get_notes_declarations(jd.path)
+
+    if not declarations:
+        return {"issues": [], "warnings": [], "message": "No notes declarations"}
+
+    issues = []
+    warnings = []
+
+    for cat_str, ids in declarations.items():
+        cat_num = int(cat_str)
+        cat = jd.find_by_category(cat_num)
+        if not cat:
+            warnings.append({"id": cat_str, "message": "Category not found in JD tree"})
+            continue
+
+        area = cat.parent
+        cat_folder = [str(area), str(cat)]
+
+        try:
+            if not folder_exists([str(area)]):
+                warnings.append({"id": cat_str, "message": f"Area folder '{area}' missing in Notes"})
+            if not folder_exists(cat_folder):
+                warnings.append({"id": cat_str, "message": f"Category folder '{cat}' missing in Notes"})
+        except NotesError as exc:
+            issues.append({"id": cat_str, "message": f"Notes error: {exc}"})
+            continue
+
+        if ids == "all":
+            id_list = [jd_id.id_str for jd_id in cat.ids]
+        else:
+            id_list = [str(i) for i in ids]
+
+        for id_str in id_list:
+            jd_id = jd.find_by_id(str(id_str))
+            if not jd_id:
+                warnings.append({"id": id_str, "message": "Declared but not found in tree"})
+                continue
+
+            note_name = _notes_id_display(jd_id)
+            stub_pattern = re.compile(
+                rf"{re.escape(jd_id.id_str)} .+ \[Apple Notes\]\.(yaml|yml)$"
+            )
+            stub_files = [f for f in jd_id.category.path.iterdir() if stub_pattern.match(f.name)]
+
+            try:
+                has_note = note_exists(cat_folder, note_name)
+            except NotesError:
+                has_note = None
+
+            if jd_id.path.is_dir():
+                issues.append({"id": jd_id.id_str,
+                               "message": "Exists as directory AND declared as Notes-backed"})
+
+            if stub_files and has_note is False:
+                issues.append({"id": jd_id.id_str,
+                               "message": f"Stub exists but note missing in Notes"})
+            elif not stub_files and has_note is True:
+                warnings.append({"id": jd_id.id_str,
+                                 "message": "Note exists in Notes but no stub file"})
+
+    return {"issues": issues, "warnings": warnings}
+
+
+@mcp.tool()
+def jd_notes_create(id_str: str, folder: bool = False, stub: bool = False) -> dict:
+    """Create a note (or folder) in Apple Notes for a JD ID.
+
+    Ensures area and category folders exist first.
+    Set folder=True to create a subfolder instead of a note.
+    Set stub=True to also create a filesystem stub file.
+    """
+    import yaml
+    from johnnydecimal.notes import (
+        create_folder, create_note, folder_exists, note_exists, NotesError,
+    )
+
+    jd = _get_root()
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        return {"error": f"ID {id_str} not found"}
+
+    area = jd_id.category.parent
+    area_folder = [str(area)]
+    cat_folder = [str(area), str(jd_id.category)]
+    note_name = _notes_id_display(jd_id)
+    result = {"id": id_str, "created": [], "error": None}
+
+    try:
+        if not folder_exists(area_folder):
+            create_folder(area_folder)
+            result["created"].append(f"folder:{area}")
+
+        if not folder_exists(cat_folder):
+            create_folder(cat_folder)
+            result["created"].append(f"folder:{jd_id.category}")
+
+        if folder:
+            id_folder = cat_folder + [note_name]
+            if not folder_exists(id_folder):
+                create_folder(id_folder)
+                result["created"].append(f"folder:{note_name}")
+        else:
+            if not note_exists(cat_folder, note_name):
+                create_note(cat_folder, note_name)
+                result["created"].append(f"note:{note_name}")
+    except NotesError as exc:
+        result["error"] = str(exc)
+        return result
+
+    if stub:
+        notes_path = " > ".join(cat_folder + [note_name])
+        stub_name = f"{jd_id.id_str} {jd_id.name} [Apple Notes].yaml"
+        stub_path = jd_id.category.path / stub_name
+        if not stub_path.exists():
+            stub_data = {"location": "Apple Notes", "path": notes_path}
+            with open(stub_path, "w") as f:
+                yaml.dump(stub_data, f, default_flow_style=False, sort_keys=False)
+            result["created"].append(f"stub:{stub_name}")
+
+    return result
+
+
+@mcp.tool()
+def jd_notes_open(id_str: str) -> dict:
+    """Open a note in Apple Notes.
+
+    Finds the note for the given JD ID and brings it up in Notes.app.
+    """
+    from johnnydecimal.notes import open_note, NotesError
+
+    jd = _get_root()
+    jd_id = jd.find_by_id(id_str)
+    if not jd_id:
+        return {"error": f"ID {id_str} not found"}
+
+    area = jd_id.category.parent
+    cat_folder = [str(area), str(jd_id.category)]
+    note_name = _notes_id_display(jd_id)
+
+    try:
+        open_note(cat_folder, note_name)
+        return {"opened": note_name, "error": None}
+    except NotesError as exc:
+        return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
