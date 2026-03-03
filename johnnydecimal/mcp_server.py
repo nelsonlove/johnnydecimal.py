@@ -554,12 +554,13 @@ def jd_init(category: str, meta: bool = True, unsorted: bool = True) -> dict:
 
 
 @mcp.tool()
-def jd_validate(fix: bool = False, dry_run: bool = False) -> dict:
+def jd_validate(fix: bool = False, dry_run: bool = False, force: bool = False) -> dict:
     """Run validation checks on the JD filing system.
 
     Returns structured issues found. With fix=True, auto-fixes safe issues
     (naming conventions, broken symlinks). With dry_run=True, shows what
-    fix would do without doing it.
+    fix would do without doing it. With force=True and fix=True, also
+    fixes wrong-target inbound links (delete + recreate).
     """
     jd = _get_root()
     issues = []
@@ -733,6 +734,64 @@ def jd_validate(fix: bool = False, dry_run: bool = False) -> dict:
             "alias_mismatches": alias_mismatches,
             "link_mismatches": link_mismatches,
         })
+
+    # Inbound link declarations in policy
+    declared_links = get_links(jd.path)
+    for jd_id_str, ext_paths in declared_links.items():
+        target_obj = jd.find_by_id(jd_id_str)
+        if not target_obj:
+            for ext in ext_paths:
+                warnings.append({
+                    "type": "inbound_link_id_not_found",
+                    "id": jd_id_str,
+                    "source": ext,
+                })
+            continue
+        for ext in ext_paths:
+            ext_expanded = Path(ext).expanduser()
+            if ext_expanded.is_symlink():
+                actual = ext_expanded.resolve()
+                expected = target_obj.path.resolve()
+                if actual != expected:
+                    if fix and force:
+                        if do_fix:
+                            ext_expanded.unlink()
+                            ext_expanded.symlink_to(target_obj.path)
+                        fixed.append({
+                            "type": "inbound_link_recreated",
+                            "source": ext,
+                            "target": str(target_obj.path),
+                        })
+                    else:
+                        issues.append({
+                            "type": "inbound_link_wrong_target",
+                            "source": ext,
+                            "actual": str(actual),
+                            "expected": str(expected),
+                        })
+            elif ext_expanded.exists():
+                issues.append({
+                    "type": "inbound_link_not_a_symlink",
+                    "source": ext,
+                    "id": jd_id_str,
+                })
+            else:
+                if fix:
+                    if do_fix:
+                        ext_expanded.parent.mkdir(parents=True, exist_ok=True)
+                        ext_expanded.symlink_to(target_obj.path)
+                    fixed.append({
+                        "type": "inbound_link_created",
+                        "source": ext,
+                        "target": str(target_obj.path),
+                    })
+                else:
+                    warnings.append({
+                        "type": "inbound_link_missing",
+                        "source": ext,
+                        "id": jd_id_str,
+                        "target_name": target_obj.name,
+                    })
 
     return {
         "issues": issues,

@@ -278,7 +278,8 @@ def new_category(area, name, explicit_num, init):
 @cli.command()
 @click.option("--fix", is_flag=True, help="Auto-fix safe issues (conventions, en-dashes, broken symlinks)")
 @click.option("-n", "--dry-run", is_flag=True, help="With --fix: show what would be changed without changing it")
-def validate(fix, dry_run):
+@click.option("--force", is_flag=True, help="With --fix: also fix wrong-target inbound links (delete + recreate)")
+def validate(fix, dry_run, force):
     """Validate the JD filing system for consistency issues."""
     if dry_run and not fix:
         click.echo("--dry-run only makes sense with --fix", err=True)
@@ -500,10 +501,18 @@ def validate(fix, dry_run):
                 actual = ext_expanded.resolve()
                 expected = target_obj.path.resolve()
                 if actual != expected:
-                    issues.append(
-                        f"LINK: WRONG TARGET: {ext} → {actual}\n"
-                        f"     expected: {expected}"
-                    )
+                    if fix and force:
+                        if do_fix:
+                            ext_expanded.unlink()
+                            ext_expanded.symlink_to(target_obj.path)
+                        fixed.append(
+                            f"LINK: Recreated inbound symlink {ext} → {target_obj.path}"
+                        )
+                    else:
+                        issues.append(
+                            f"LINK: WRONG TARGET: {ext} → {actual}\n"
+                            f"     expected: {expected}"
+                        )
             elif ext_expanded.exists():
                 issues.append(
                     f"LINK: NOT A SYMLINK: {ext} exists but is not a symlink to {jd_id_str}"
@@ -2018,7 +2027,7 @@ def symlinks_cmd(check, fix):
 
 
 @cli.command("ln")
-@click.argument("source")
+@click.argument("source", type=click.Path())
 @click.argument("jd_id", type=JD_ID)
 @click.option("--remove", is_flag=True, help="Remove the inbound link instead of creating it.")
 def ln_cmd(source, jd_id, remove):

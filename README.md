@@ -86,7 +86,7 @@ jd restore --renumber 86.03  # if 86.03 is now taken, assigns next available
 
 | Command | Description |
 |---------|-------------|
-| `jd validate` | Check for duplicates, mismatches, convention violations. `--fix` auto-fixes, `--dry-run` previews |
+| `jd validate` | Check for duplicates, mismatches, convention violations. `--fix` auto-fixes, `--force` fixes wrong-target links, `--dry-run` previews |
 | `jd triage` | Show busiest unsorted dirs, file-IDs, empty categories |
 | `jd generate-index` | Regenerate `00.00/Index.md` from the filesystem |
 
@@ -111,7 +111,7 @@ links:
     - ~/.gnupg
 ```
 
-`jd ln` creates the symlink and adds the policy entry in one step. `jd validate --fix` creates any missing inbound symlinks.
+`jd ln` creates the symlink and adds the policy entry in one step. `jd validate --fix` creates any missing inbound symlinks. `jd validate --fix --force` also recreates symlinks that point to the wrong target.
 
 ### External Volumes
 
@@ -221,7 +221,7 @@ The MCP server provides 21 tools covering navigation, creation, moving, archivin
 | `jd_ls` | Tree listing of a target |
 | `jd_new_id` / `jd_new_category` | Create new entries |
 | `jd_move` | Move, rename, renumber, or archive |
-| `jd_validate` | Run validation with cross-volume and inbound link checks |
+| `jd_validate` | Run validation with cross-volume and inbound link checks. Supports `force` for wrong-target links |
 | `jd_symlinks` | List all symlinks with git status and inbound link state |
 | `jd_ln` | Create/remove inbound symlinks and update policy |
 | `jd_volume_list` / `jd_volume_scan` | External drive management |
@@ -244,6 +244,13 @@ $ jd which 26.<TAB>
 To regenerate:
 ```bash
 _JD_COMPLETE=zsh_source jd > ~/.zfunc/_jd
+```
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
 ```
 
 ## License
