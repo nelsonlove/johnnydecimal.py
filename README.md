@@ -76,8 +76,8 @@ All `mv` operations support `--dry-run` / `-n`.
 Archive is round-trip safe. Archived items preserve their original names. Empty `.99` dirs are auto-cleaned on last restore.
 
 ```bash
-jd mv -a 86.03          # → 86.99 Archive/86.03 Wedding Photos/
-jd mv -a 21             # → 20.99 Archive/21 Jen/
+jd mv -a 86.03          # → 86.99 Archive/86.03 Travel Photos/
+jd mv -a 21             # → 20.99 Archive/21 Old Projects/
 jd restore 86.03        # exact reversal
 jd restore --renumber 86.03  # if 86.03 is now taken, assigns next available
 ```
@@ -208,12 +208,12 @@ Two-tier triage flow: `01.xx` (capture) → `xx.01` (category unsorted) → `xx.
 Agents can be restricted to specific areas/categories via a `jd.yaml` file in their workspace:
 
 ```yaml
-# Kin — family agent
+# family-agent — restricted to family areas
 scope:
   - "20-29"    # Family area
   - "13"       # Health and medical
 
-# Rex — unrestricted
+# general-agent — unrestricted
 scope: all
 ```
 

@@ -27,10 +27,10 @@ OF Folder  = JD Area     (20-29 Family)
 OF projects get a `JD:xx.xx` or `JD:xx` tag linking to where artifacts live.
 
 ```
-OF: "Motion for Temporary Orders" [JD:26.17]
-  - Review draft from Meghan
-  - Gather financial docs (see 40-49)
-  - Court date 3/15
+OF: "Kitchen Renovation" [JD:26.17]
+  - Review contractor quote
+  - Gather material samples (see 40-49)
+  - Site visit 3/15
 ```
 
 Projects are cross-cutting. A single OF project may reference multiple JD locations. That's fine — the tag points to the *primary* artifact location, notes can reference others.
@@ -50,7 +50,7 @@ The closed loop for processing email:
 2. **Extract actions** → create OF task/project with `JD:xx.xx` tag and context
 3. **Archive email** → it's been processed, search if you need it again
 
-Agents (Kin, Rex) can do steps 1-3 for routine emails. Human triage for anything ambiguous.
+Agents can do steps 1-3 for routine emails. Human triage for anything ambiguous.
 
 ## What NOT to Do
 

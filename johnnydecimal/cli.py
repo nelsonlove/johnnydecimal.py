@@ -1534,16 +1534,18 @@ def generate_index():
         lines.append("")
 
     # Write to 00.00 Index.md
-    index_path = jd.path / "00-09 Meta" / "00 Indices" / "00.00 Index.md"
-    if not index_path.parent.exists():
-        click.echo(f"Index directory not found: {index_path.parent}", err=True)
+    from johnnydecimal.policy import find_meta_dir
+    meta_dir = find_meta_dir(jd.path)
+    if not meta_dir or not meta_dir.exists():
+        click.echo("Meta directory (00.00) not found", err=True)
         raise SystemExit(1)
 
+    index_path = meta_dir / "Index.md"
     index_path.write_text("\n".join(lines) + "\n")
     click.echo(f"Generated: {index_path}")
 
     # Also write jd.json
-    json_path = index_path.parent / "jd.json"
+    json_path = meta_dir / "jd.json"
     json_path.write_text(json.dumps(jd.to_dict(), indent=2) + "\n")
     click.echo(f"Generated: {json_path}")
 

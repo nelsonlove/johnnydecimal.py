@@ -351,8 +351,6 @@ def jd_new_id(category: str, name: str) -> dict:
             pass  # meta is only for .00
         # For .00, it's the meta dir itself — already created
 
-    new_path.mkdir(exist_ok=True)
-
     return {"id": id_str, "name": name, "path": str(new_path)}
 
 

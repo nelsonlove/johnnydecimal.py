@@ -57,7 +57,7 @@ def is_jd_root(directory: Path) -> bool:
     """
     Check if a directory is the root of a Johnny Decimal filing system.
     A root has at least 3 JD area directories. Non-JD dirs are tolerated
-    (orphans like FabFilter, Zoom, etc. are common in ~/Documents).
+    (non-JD app folders are common in ~/Documents).
     """
     try:
         children = [d for d in directory.iterdir() if d.is_dir() and not d.name.startswith(".")]

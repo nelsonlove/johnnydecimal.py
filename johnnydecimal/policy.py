@@ -54,29 +54,29 @@ def find_meta_dir(path: Path) -> Optional[Path]:
     import re
     
     name = path.name
-    
+
     # Is this already a meta dir (xx.00)?
-    if re.match(r"\d{2}\.00$", name):
+    if re.match(r"\d{2}\.00( |$)", name):
         return path
-    
+
     # Is this an ID (xx.yy)? → sibling xx.00
     m = re.match(r"(\d{2})\.\d{2}", name)
     if m:
         cat_num = m.group(1)
-        meta = path.parent / f"{cat_num}.00"
-        if meta.exists():
-            return meta
+        for sibling in path.parent.iterdir():
+            if sibling.is_dir() and sibling.name.startswith(f"{cat_num}.00"):
+                return sibling
         return None
-    
+
     # Is this a category (xx Name)? → child xx.00
     m = re.match(r"(\d{2}) ", name)
     if m:
         cat_num = m.group(1)
-        meta = path / f"{cat_num}.00"
-        if meta.exists():
-            return meta
+        for child in path.iterdir():
+            if child.is_dir() and child.name.startswith(f"{cat_num}.00"):
+                return child
         return None
-    
+
     # Is this an area (xx-xx Name)? → find x0 meta category, then x0.00
     m = re.match(r"(\d)(\d)[-–]\d{2} ", name)
     if m:
@@ -85,20 +85,20 @@ def find_meta_dir(path: Path) -> Optional[Path]:
         # Look for the x0 category dir
         for child in path.iterdir():
             if child.is_dir() and child.name.startswith(f"{meta_cat_num} "):
-                meta = child / f"{meta_cat_num}.00"
-                if meta.exists():
-                    return meta
+                for meta_child in child.iterdir():
+                    if meta_child.is_dir() and meta_child.name.startswith(f"{meta_cat_num}.00"):
+                        return meta_child
                 return None
         return None
-    
+
     # Root — look for 00-09 area → 00 category → 00.00
     for area_child in path.iterdir():
         if area_child.is_dir() and re.match(r"00[-–]09 ", area_child.name):
             for cat_child in area_child.iterdir():
                 if cat_child.is_dir() and cat_child.name.startswith("00 "):
-                    meta = cat_child / "00.00"
-                    if meta.exists():
-                        return meta
+                    for meta_child in cat_child.iterdir():
+                        if meta_child.is_dir() and meta_child.name.startswith("00.00"):
+                            return meta_child
     return None
 
 

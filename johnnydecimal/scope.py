@@ -9,7 +9,7 @@ Scope file format (jd.yaml):
       - "20-29"       # entire area
       - "42"          # single category
       - "86.03"       # single ID (rare, but allowed)
-    # scope: all      # unrestricted (Rex)
+    # scope: all      # unrestricted
 
 Resolution:
     1. JD_AGENT_SCOPE env var (path to jd.yaml)
