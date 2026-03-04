@@ -42,9 +42,17 @@
 - [ ] Test in real shell (Click's `_JD_COMPLETE=zsh_complete` needs `COMP_WORDS`)
 - [ ] Bash/fish completion support
 
+### Naming
+- [ ] CLI-friendly directory naming: `06.03 Dotfiles` → `06-03-dotfiles` (no spaces, no dots, lowercase)
+  - Configurable naming convention in root policy (current vs CLI-friendly)
+  - Dual-format parser during migration (recognize both formats)
+  - `jd migrate` command — piecemeal (one area/category at a time) with rollback
+  - Keep JD IDs dotted in tags/references (`26.05`) — only change filesystem names
+  - Touches: models, all regexes, symlinks, Notes folders, OF tags, stubs, policy patterns, completion, iCloud sync
+
 ### Cross-App Integration
-- [ ] Apple Notes validation (sparse subset, JD naming match)
-- [ ] OmniFocus mapping (project/folder ↔ JD category)
+- [x] Apple Notes connector (scan, validate, stub, create, open)
+- [x] OmniFocus connector (scan, validate, open, tag, create)
 - [ ] Email (IMAP) folder structure
 - [ ] Obsidian vault alignment (if kept)
 - [ ] `jd validate --notes` / `jd validate --omnifocus` for cross-app checks
