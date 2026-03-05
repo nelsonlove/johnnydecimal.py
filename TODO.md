@@ -50,6 +50,14 @@
   - Keep JD IDs dotted in tags/references (`26.05`) — only change filesystem names
   - Touches: models, all regexes, symlinks, Notes folders, OF tags, stubs, policy patterns, completion, iCloud sync
 
+### Staging (`xx.02 Staging`)
+- [x] Created `xx.02 [Area] - Staging` dirs in all 10 area meta categories (00.06 for System since 00.02-05 taken)
+- [ ] `jd stage <file> [area]` — move items to the area's staging dir, Finder-tag with origin path for easy return
+- [ ] `jd unstage [area]` — return staged items to their origin (read Finder tags)
+- [ ] Desktop integration — `jd stage --desktop` sweeps Desktop contents into staging; `jd unstage --desktop` restores a specific set to Desktop
+- [ ] Finder tagging via `xattr` or `tag` CLI for origin-path metadata
+- [ ] Policy: recognize `xx.02` as staging (like `xx.01` is unsorted), skip in orphan detection
+
 ### Cross-App Integration
 - [x] Apple Notes connector (scan, validate, stub, create, open)
 - [x] OmniFocus connector (scan, validate, open, tag, create)
