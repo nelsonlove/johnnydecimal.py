@@ -13,7 +13,7 @@
 - [x] `jd ls` wrapping `tree` (fallback to `ls -R`)
 - [x] `jd triage` — busiest unsorted, file-IDs, empty categories
 - [x] Tab completion: `JDIdType` with `Category > Name` disambiguation
-- [x] Cascading policy system (`.johnnydecimal.yaml`, pattern matching)
+- [x] Cascading policy system (`.johnnydecimal.yaml`, pattern matching) — migrating to `jd.yaml`
 - [x] `ids_as_files` policy (default false, validate flags violations)
 - [x] `ids_files_only` policy
 - [x] `jd policy show/get/set/unset/where`
@@ -30,7 +30,12 @@
 - [ ] `jd renum` — batch renumber within a category
 - [ ] `jd stats` — system-wide statistics (total IDs, sizes, age distribution)
 - [ ] `jd gc` — clean up empty dirs, broken symlinks, .DS_Store
-- [ ] Config file (`~/.config/johnnydecimal/config.yaml`) for root path, external drives, ignore patterns
+- [ ] Unified `jd.yaml` config file (replaces `.johnnydecimal.yaml`)
+  - Two top-level keys: `policy:` (validation rules) and `config:` (behavior)
+  - `jd.example.yaml` in the jd-cli repo as documented default
+  - Cascading: JD root → area meta dir → category meta dir → ID meta dir (each overrides)
+  - Migrate existing `.johnnydecimal.yaml` policy into `jd.yaml` `policy:` key
+  - `config:` holds repo roots, staging prefs, ignore patterns, external drives, etc.
 
 ### Validation
 - [ ] Gap detection — missing expected IDs in a sequence
@@ -50,13 +55,19 @@
   - Keep JD IDs dotted in tags/references (`26.05`) — only change filesystem names
   - Touches: models, all regexes, symlinks, Notes folders, OF tags, stubs, policy patterns, completion, iCloud sync
 
-### Staging (`xx.02 Staging`)
-- [x] Created `xx.02 [Area] - Staging` dirs in all 10 area meta categories (00.06 for System since 00.02-05 taken)
-- [ ] `jd stage <file> [area]` — move items to the area's staging dir, Finder-tag with origin path for easy return
-- [ ] `jd unstage [area]` — return staged items to their origin (read Finder tags)
-- [ ] Desktop integration — `jd stage --desktop` sweeps Desktop contents into staging; `jd unstage --desktop` restores a specific set to Desktop
-- [ ] Finder tagging via `xattr` or `tag` CLI for origin-path metadata
-- [ ] Policy: recognize `xx.02` as staging (like `xx.01` is unsorted), skip in orphan detection
+### Staging
+- [ ] `jd tag add <id> <path>` — add `JD:xx.xx` Finder tag to a file/dir (no move)
+- [ ] `jd tag remove <path>` — strip `JD:*` Finder tag
+- [ ] `jd stage <id>` — tag + move ID's top-level items to `~/Desktop` (ID-prefixed), leave symlinks in JD dir
+- [ ] `jd unstage [id]` — scan Desktop for `JD:*`-tagged items, remove tags, clean up symlinks, move back; no arg = unstage all
+- [ ] Finder tagging via `xattr` (`com.apple.metadata:_kMDItemUserTags` binary plist)
+
+### Repo Discovery
+- [ ] Configurable `repo_roots` list in config (e.g. `~/repos`, `~/.config`)
+  - Check each root itself for `.git` (not just its children) — `~/.config` will be a repo
+  - Also scan immediate children for `.git` dirs (e.g. `~/repos/*`)
+- [ ] `jd ln --repos` — scan repo roots, show unlinked repos, suggest/create JD symlinks
+- [ ] Integrate with `jd validate` — flag repos without JD symlinks
 
 ### Cross-App Integration
 - [x] Apple Notes connector (scan, validate, stub, create, open)
