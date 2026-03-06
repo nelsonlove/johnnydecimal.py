@@ -36,6 +36,15 @@
   - Cascading: JD root → area meta dir → category meta dir → ID meta dir (each overrides)
   - Migrate existing `.johnnydecimal.yaml` policy into `jd.yaml` `policy:` key
   - `config:` holds repo roots, staging prefs, ignore patterns, external drives, etc.
+- [ ] `jd config edit [TARGET]` — open jd.yaml in `$EDITOR` at the appropriate level
+  - No arg: root jd.yaml (00.00 Meta)
+  - JD ID (e.g. `26.05`): that ID's meta dir jd.yaml
+  - Category (e.g. `26`): that category's meta dir jd.yaml
+  - Area (e.g. `20-29`): that area's meta dir jd.yaml
+  - Creates from `jd.example.yaml` if file doesn't exist yet
+- [ ] `jd config show [TARGET]` — like `jd policy show` but for the full jd.yaml (policy + config)
+- [ ] `jd config get/set/unset` — like `jd policy get/set/unset` but supports `config.*` keys too
+- [ ] Merge `jd policy` subcommands into `jd config` (policy becomes `jd config get/set policy.*`)
 
 ### Validation
 - [ ] Gap detection — missing expected IDs in a sequence
@@ -56,11 +65,12 @@
   - Touches: models, all regexes, symlinks, Notes folders, OF tags, stubs, policy patterns, completion, iCloud sync
 
 ### Staging
-- [ ] `jd tag add <id> <path>` — add `JD:xx.xx` Finder tag to a file/dir (no move)
-- [ ] `jd tag remove <path>` — strip `JD:*` Finder tag
-- [ ] `jd stage <id>` — tag + move ID's top-level items to `~/Desktop` (ID-prefixed), leave symlinks in JD dir
-- [ ] `jd unstage [id]` — scan Desktop for `JD:*`-tagged items, remove tags, clean up symlinks, move back; no arg = unstage all
-- [ ] Finder tagging via `xattr` (`com.apple.metadata:_kMDItemUserTags` binary plist)
+- [x] `jd tag add <id> <path>` — add `JD:xx.xx` Finder tag to a file/dir (no move)
+- [x] `jd tag remove <path>` — strip `JD:*` Finder tag
+- [x] `jd stage <id>` — unstage current, then tag + move ID's top-level items to `~/Desktop` (ID-prefixed), leave symlinks in JD dir; `--add` to keep existing
+- [x] `jd unstage [id]` — scan Desktop for `JD:*`-tagged items, remove tags, clean up symlinks, move back; no arg = unstage all
+- [x] Finder tagging via `xattr` (`com.apple.metadata:_kMDItemUserTags` binary plist)
+- [x] MCP tools: `jd_stage`, `jd_unstage`, `jd_tag_add`, `jd_tag_remove`
 
 ### Repo Discovery
 - [ ] Configurable `repo_roots` list in config (e.g. `~/repos`, `~/.config`)
@@ -77,6 +87,27 @@
 - [ ] `jd validate --notes` / `jd validate --omnifocus` for cross-app checks
 
 ### Agent Integration
+- [ ] `jd claude [TARGET]` — launch Claude Code with cascading JD context
+  - Walk up from CWD (or TARGET) to find nearest ID/category/area
+  - Levels: system meta (00.00) → area meta (x0.00) → category meta (xx.00) → ID dir
+  - At each level, collect files matching `stems × extensions` (cartesian product) + `extra` globs
+  - `stems` and `extensions` define display order (stem > extension > level)
+  - Child levels append new stems/extensions only if not already present (preserves ordering)
+  - `extra` is local-only; `exclude` skips specific files at a given level
+  - Each file gets a header: `# path/relative/to/jd-root/FILENAME.md`
+  - Concatenate and pass via `claude --append-system-prompt`
+  - JD tree has no `.git` — Claude Code won't auto-load CLAUDE.md, so `jd claude` handles all levels including current
+  - `--dry-run` / `-n` — show which files would be included from which levels without launching
+  - Configurable in `config.claude.include`:
+    ```yaml
+    config:
+      claude:
+        include:
+          stems: [README, TODO, CLAUDE]
+          extensions: [.md, .org, .txt]
+          extra: ["*.md"]  # does not cascade; globs match the defining dir only
+          exclude: []       # skip specific files at this level
+    ```
 - [ ] Make `jd` an OpenClaw skill so all agents can use it
 - [ ] `jd.json` cached index (faster than filesystem scan every time)
 
