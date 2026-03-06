@@ -402,6 +402,58 @@ class TestTagRemoveCli:
         mock_remove.assert_called_once_with(Path(str(target)), None)
 
 
+class TestStagingRoundTrip:
+    def test_stage_then_unstage_restores_original_state(self, tmp_path):
+        """Full round trip: stage moves files + creates symlinks, unstage reverses."""
+        id_dir = tmp_path / "26.05 Sourdough"
+        id_dir.mkdir()
+        (id_dir / "recipe.txt").write_text("flour and water")
+        (id_dir / "photos").mkdir()
+        (id_dir / "photos" / "bread.jpg").write_text("img data")
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+
+        # Stage
+        with patch("johnnydecimal.staging.add_jd_tag"):
+            staged = stage_items(id_dir, "26.05", desktop)
+        assert set(staged) == {"recipe.txt", "photos"}
+        assert (id_dir / "recipe.txt").is_symlink()
+        assert (id_dir / "photos").is_symlink()
+        assert (desktop / "26.05 recipe.txt").exists()
+        assert (desktop / "26.05 photos" / "bread.jpg").exists()
+
+        # Unstage
+        with patch("johnnydecimal.staging.get_jd_tags", return_value=["26.05"]), \
+             patch("johnnydecimal.staging.remove_jd_tag"):
+            unstaged = unstage_items(desktop, find_id_dir=lambda _: id_dir)
+        assert len(unstaged) == 2
+
+        # Verify restored state
+        assert (id_dir / "recipe.txt").exists()
+        assert not (id_dir / "recipe.txt").is_symlink()
+        assert (id_dir / "recipe.txt").read_text() == "flour and water"
+        assert (id_dir / "photos").is_dir()
+        assert not (id_dir / "photos").is_symlink()
+        assert (id_dir / "photos" / "bread.jpg").read_text() == "img data"
+        assert list(desktop.iterdir()) == []
+
+    def test_manually_tagged_then_unstage(self, tmp_path):
+        """Items tagged with jd tag add (no prefix, no symlink) get unstaged correctly."""
+        id_dir = tmp_path / "26.05 Sourdough"
+        id_dir.mkdir()
+        desktop = tmp_path / "Desktop"
+        desktop.mkdir()
+        (desktop / "random-doc.pdf").write_text("doc content")
+
+        with patch("johnnydecimal.staging.get_jd_tags", return_value=["26.05"]), \
+             patch("johnnydecimal.staging.remove_jd_tag"):
+            unstaged = unstage_items(desktop, find_id_dir=lambda _: id_dir)
+
+        assert (id_dir / "random-doc.pdf").exists()
+        assert (id_dir / "random-doc.pdf").read_text() == "doc content"
+        assert not (desktop / "random-doc.pdf").exists()
+
+
 class TestStageMcp:
     """MCP tool wrappers for staging operations."""
 
