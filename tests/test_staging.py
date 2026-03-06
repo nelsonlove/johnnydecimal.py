@@ -315,12 +315,24 @@ class TestStageCli:
     """jd stage — CLI wrapper around stage_items."""
 
     @patch("johnnydecimal.cli.stage_items", return_value=["recipe.txt"])
-    def test_stages_id_contents(self, mock_stage, tmp_jd_root, monkeypatch):
+    @patch("johnnydecimal.cli.unstage_items", return_value=[])
+    def test_unstages_first_by_default(self, mock_unstage, mock_stage, tmp_jd_root, monkeypatch):
         monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
         result = _run(tmp_jd_root, monkeypatch, ["stage", "26.05"])
 
         assert result.exit_code == 0
         assert "recipe.txt" in result.output
+        mock_unstage.assert_called_once()
+        mock_stage.assert_called_once()
+
+    @patch("johnnydecimal.cli.stage_items", return_value=["recipe.txt"])
+    def test_add_skips_unstage(self, mock_stage, tmp_jd_root, monkeypatch):
+        monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
+        with patch("johnnydecimal.cli.unstage_items") as mock_unstage:
+            result = _run(tmp_jd_root, monkeypatch, ["stage", "--add", "26.05"])
+
+        assert result.exit_code == 0
+        mock_unstage.assert_not_called()
         mock_stage.assert_called_once()
 
     def test_error_when_id_not_found(self, tmp_jd_root, monkeypatch):
@@ -329,7 +341,8 @@ class TestStageCli:
         assert result.exit_code != 0
 
     @patch("johnnydecimal.cli.stage_items", return_value=["recipe.txt"])
-    def test_dry_run(self, mock_stage, tmp_jd_root, monkeypatch):
+    @patch("johnnydecimal.cli.unstage_items", return_value=[])
+    def test_dry_run(self, mock_unstage, mock_stage, tmp_jd_root, monkeypatch):
         monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
         result = _run(tmp_jd_root, monkeypatch, ["stage", "-n", "26.05"])
 

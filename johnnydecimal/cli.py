@@ -2323,16 +2323,20 @@ def tag_remove(path, jd_id):
 @cli.command()
 @click.argument("jd_id", type=JD_ID)
 @click.option("-n", "--dry-run", is_flag=True, help="Show what would be staged without doing it")
-def stage(jd_id, dry_run):
+@click.option("--add", is_flag=True, help="Stage alongside existing items (default: unstage first)")
+def stage(jd_id, dry_run, add):
     """Stage a JD ID's contents to the Desktop.
 
-    Moves top-level items to ~/Desktop (prefixed with the ID),
-    tags them with JD:xx.xx, and leaves symlinks in the JD directory.
+    Unstages any currently staged items first, then moves top-level items
+    to ~/Desktop (prefixed with the ID), tags them with JD:xx.xx, and
+    leaves symlinks in the JD directory. Use --add to keep existing
+    staged items.
 
     \b
     Example:
-        jd stage 26.05
-        jd stage -n 26.05
+        jd stage 26.05          # swap: unstage current, stage 26.05
+        jd stage --add 26.05    # additive: keep existing, add 26.05
+        jd stage -n 26.05       # preview only
     """
     jd = get_root()
     target = jd.find_by_id(jd_id)
@@ -2342,7 +2346,18 @@ def stage(jd_id, dry_run):
     if not target.path.is_dir():
         click.echo(f"{jd_id} is a file-ID, not a directory.", err=True)
         raise SystemExit(1)
+
     prefix = "(dry run) " if dry_run else ""
+
+    # Unstage existing items first (unless --add)
+    if not add:
+        def find_id_dir(id_str):
+            obj = jd.find_by_id(id_str)
+            return obj.path if obj else None
+        returned = unstage_items(DESKTOP, find_id_dir, dry_run=dry_run)
+        for entry in returned:
+            click.echo(f"{prefix}{entry['name']} <- ~/Desktop")
+
     staged = stage_items(target.path, jd_id, DESKTOP, dry_run=dry_run)
     if not staged:
         click.echo(f"Nothing to stage in {jd_id}.")

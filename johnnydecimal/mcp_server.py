@@ -1816,11 +1816,13 @@ def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def jd_stage(jd_id: str) -> dict:
+def jd_stage(jd_id: str, add: bool = False) -> dict:
     """Stage a JD ID's contents to the Desktop.
 
-    Moves top-level items to ~/Desktop (prefixed with the ID),
-    tags them with JD:xx.xx, and leaves symlinks in the JD directory.
+    Unstages any currently staged items first, then moves top-level items
+    to ~/Desktop (prefixed with the ID), tags them with JD:xx.xx, and
+    leaves symlinks in the JD directory. Set add=True to keep existing
+    staged items.
     """
     jd = _get_root()
     target = jd.find_by_id(jd_id)
@@ -1828,8 +1830,16 @@ def jd_stage(jd_id: str) -> dict:
         return {"error": f"ID {jd_id} not found"}
     if not target.path.is_dir():
         return {"error": f"{jd_id} is a file-ID, not a directory"}
+
+    returned = []
+    if not add:
+        def find_id_dir(id_str):
+            obj = jd.find_by_id(id_str)
+            return obj.path if obj else None
+        returned = unstage_items(DESKTOP, find_id_dir)
+
     staged = stage_items(target.path, jd_id, DESKTOP)
-    return {"error": None, "jd_id": jd_id, "staged": staged}
+    return {"error": None, "jd_id": jd_id, "staged": staged, "unstaged": returned}
 
 
 @mcp.tool()
