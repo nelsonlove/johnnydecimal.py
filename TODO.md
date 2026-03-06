@@ -96,6 +96,7 @@
   - `extra` is local-only; `exclude` skips specific files at a given level
   - Each file gets a header: `# path/relative/to/jd-root/FILENAME.md`
   - Concatenate and pass via `claude --append-system-prompt`
+  - Working dir pinned to nearest JD level (id → category → area → root) from CWD
   - JD tree has no `.git` — Claude Code won't auto-load CLAUDE.md, so `jd claude` handles all levels including current
   - `--dry-run` / `-n` — show which files would be included from which levels without launching
   - Configurable in `config.claude.include`:
@@ -108,6 +109,12 @@
           extra: ["*.md"]  # does not cascade; globs match the defining dir only
           exclude: []       # skip specific files at this level
     ```
+  - Retire POLICY.md — fold content into README.md (context/conventions) and CLAUDE.md (agent directives) at the system level
+  - Define standard doc purposes in 00.00 README.md:
+    - **README.md** — what this level contains, conventions, context (for humans and agents)
+    - **TODO.md** — open tasks and plans for this level
+    - **CLAUDE.md** — agent-specific instructions (behavioral rules, constraints, preferences)
+  - Any ALL-CAPS `.md` files at JD meta levels (REPOS.md, etc.) should be documented or folded into the standard three
 - [ ] Make `jd` an OpenClaw skill so all agents can use it
 - [ ] `jd.json` cached index (faster than filesystem scan every time)
 
