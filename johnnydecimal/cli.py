@@ -10,7 +10,9 @@ from johnnydecimal import api
 from johnnydecimal.completion import JD_ID
 from johnnydecimal.policy import resolve_policy, get_convention, get_volumes, get_links, find_root_policy
 from johnnydecimal.scope import check_scope
-from johnnydecimal.staging import add_jd_tag, remove_jd_tag
+from johnnydecimal.staging import add_jd_tag, remove_jd_tag, stage_items, unstage_items
+
+DESKTOP = Path.home() / "Desktop"
 from johnnydecimal.util import parse_jd_id_string, format_jd_id
 
 
@@ -2312,6 +2314,68 @@ def tag_remove(path, jd_id):
         click.echo(f"Removed JD:{jd_id} tag from {target.name}")
     else:
         click.echo(f"Removed all JD tags from {target.name}")
+
+
+# ---------------------------------------------------------------------------
+# Staging — move items to/from Desktop
+# ---------------------------------------------------------------------------
+
+@cli.command()
+@click.argument("jd_id", type=JD_ID)
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would be staged without doing it")
+def stage(jd_id, dry_run):
+    """Stage a JD ID's contents to the Desktop.
+
+    Moves top-level items to ~/Desktop (prefixed with the ID),
+    tags them with JD:xx.xx, and leaves symlinks in the JD directory.
+
+    \b
+    Example:
+        jd stage 26.05
+        jd stage -n 26.05
+    """
+    jd = get_root()
+    target = jd.find_by_id(jd_id)
+    if not target:
+        click.echo(f"ID {jd_id} not found.", err=True)
+        raise SystemExit(1)
+    if not target.path.is_dir():
+        click.echo(f"{jd_id} is a file-ID, not a directory.", err=True)
+        raise SystemExit(1)
+    prefix = "(dry run) " if dry_run else ""
+    staged = stage_items(target.path, jd_id, DESKTOP, dry_run=dry_run)
+    if not staged:
+        click.echo(f"Nothing to stage in {jd_id}.")
+        return
+    for name in staged:
+        click.echo(f"{prefix}{name} -> ~/Desktop/{jd_id} {name}")
+
+
+@cli.command()
+@click.argument("jd_id", type=JD_ID, required=False, default=None)
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would be unstaged without doing it")
+def unstage(jd_id, dry_run):
+    """Return staged items from Desktop to their JD directories.
+
+    Scans ~/Desktop for JD-tagged items and moves them back.
+
+    \b
+    Example:
+        jd unstage
+        jd unstage 26.05
+        jd unstage -n
+    """
+    jd = get_root()
+    def find_id_dir(id_str):
+        obj = jd.find_by_id(id_str)
+        return obj.path if obj else None
+    prefix = "(dry run) " if dry_run else ""
+    result = unstage_items(DESKTOP, find_id_dir, filter_id=jd_id, dry_run=dry_run)
+    if not result:
+        click.echo("Nothing to unstage.")
+        return
+    for entry in result:
+        click.echo(f"{prefix}{entry['name']} -> {entry['dest']}")
 
 
 # ---------------------------------------------------------------------------

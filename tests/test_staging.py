@@ -311,6 +311,55 @@ class TestUnstageItems:
         mock_remove_tag.assert_not_called()
 
 
+class TestStageCli:
+    """jd stage — CLI wrapper around stage_items."""
+
+    @patch("johnnydecimal.cli.stage_items", return_value=["recipe.txt"])
+    def test_stages_id_contents(self, mock_stage, tmp_jd_root, monkeypatch):
+        monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
+        result = _run(tmp_jd_root, monkeypatch, ["stage", "26.05"])
+
+        assert result.exit_code == 0
+        assert "recipe.txt" in result.output
+        mock_stage.assert_called_once()
+
+    def test_error_when_id_not_found(self, tmp_jd_root, monkeypatch):
+        result = _run(tmp_jd_root, monkeypatch, ["stage", "99.99"])
+
+        assert result.exit_code != 0
+
+    @patch("johnnydecimal.cli.stage_items", return_value=["recipe.txt"])
+    def test_dry_run(self, mock_stage, tmp_jd_root, monkeypatch):
+        monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
+        result = _run(tmp_jd_root, monkeypatch, ["stage", "-n", "26.05"])
+
+        assert "dry run" in result.output
+        _, kwargs = mock_stage.call_args
+        assert kwargs.get("dry_run") is True
+
+
+class TestUnstageCli:
+    """jd unstage — CLI wrapper around unstage_items."""
+
+    @patch("johnnydecimal.cli.unstage_items", return_value=[{"name": "26.05 recipe.txt", "jd_id": "26.05", "dest": "/tmp/id_dir/recipe.txt"}])
+    def test_unstages_all(self, mock_unstage, tmp_jd_root, monkeypatch):
+        monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
+        result = _run(tmp_jd_root, monkeypatch, ["unstage"])
+
+        assert result.exit_code == 0
+        assert "recipe.txt" in result.output
+        mock_unstage.assert_called_once()
+
+    @patch("johnnydecimal.cli.unstage_items", return_value=[{"name": "26.05 recipe.txt", "jd_id": "26.05", "dest": "/tmp/id_dir/recipe.txt"}])
+    def test_unstages_specific_id(self, mock_unstage, tmp_jd_root, monkeypatch):
+        monkeypatch.setattr("johnnydecimal.cli.DESKTOP", tmp_jd_root / "Desktop")
+        result = _run(tmp_jd_root, monkeypatch, ["unstage", "26.05"])
+
+        assert result.exit_code == 0
+        _, kwargs = mock_unstage.call_args
+        assert kwargs.get("filter_id") == "26.05"
+
+
 class TestTagAddCli:
     """jd tag add — CLI wrapper around add_jd_tag."""
 
