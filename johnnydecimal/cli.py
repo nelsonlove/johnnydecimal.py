@@ -10,6 +10,7 @@ from johnnydecimal import api
 from johnnydecimal.completion import JD_ID
 from johnnydecimal.policy import resolve_policy, get_convention, get_volumes, get_links, find_root_policy
 from johnnydecimal.scope import check_scope
+from johnnydecimal.staging import add_jd_tag, remove_jd_tag
 from johnnydecimal.util import parse_jd_id_string, format_jd_id
 
 
@@ -2261,6 +2262,56 @@ def notes_open(id_str):
     except NotesError as exc:
         click.echo(f"ERROR: Could not open note: {exc}", err=True)
         raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# Finder tag management
+# ---------------------------------------------------------------------------
+
+@cli.group()
+def tag():
+    """Manage JD Finder tags."""
+    pass
+
+
+@tag.command("add")
+@click.argument("jd_id", type=JD_ID)
+@click.argument("path", type=click.Path(exists=True))
+def tag_add(jd_id, path):
+    """Add a JD Finder tag to a file or folder.
+
+    \b
+    Examples:
+        jd tag add 26.05 ~/Desktop/recipe.pdf
+    """
+    jd = get_root()
+    found = jd.find_by_id(jd_id)
+    if not found:
+        click.echo(f"JD ID {jd_id} not found in tree.", err=True)
+        raise SystemExit(1)
+
+    target = Path(path)
+    add_jd_tag(target, jd_id)
+    click.echo(f"Tagged {target.name} with JD:{jd_id}")
+
+
+@tag.command("remove")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--id", "jd_id", type=JD_ID, default=None, help="Remove only this JD tag (default: all).")
+def tag_remove(path, jd_id):
+    """Remove JD Finder tag(s) from a file or folder.
+
+    \b
+    Examples:
+        jd tag remove ~/Desktop/recipe.pdf          → remove all JD tags
+        jd tag remove --id 26.05 ~/Desktop/recipe.pdf  → remove only JD:26.05
+    """
+    target = Path(path)
+    remove_jd_tag(target, jd_id)
+    if jd_id:
+        click.echo(f"Removed JD:{jd_id} tag from {target.name}")
+    else:
+        click.echo(f"Removed all JD tags from {target.name}")
 
 
 # ---------------------------------------------------------------------------

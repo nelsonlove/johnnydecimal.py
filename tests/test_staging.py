@@ -4,7 +4,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from click.testing import CliRunner
 
+from johnnydecimal.cli import cli
 from johnnydecimal.staging import (
     _strip_id_prefix,
     add_jd_tag,
@@ -15,6 +17,13 @@ from johnnydecimal.staging import (
 )
 
 STAGING = "johnnydecimal.staging"
+
+
+def _run(tmp_jd_root, monkeypatch, args):
+    from johnnydecimal.models import JDSystem
+    monkeypatch.setattr("johnnydecimal.cli.get_root", lambda: JDSystem(tmp_jd_root))
+    runner = CliRunner()
+    return runner.invoke(cli, args)
 
 
 class TestGetJdTags:
@@ -300,3 +309,45 @@ class TestUnstageItems:
         assert staged.exists()
         assert link.is_symlink()
         mock_remove_tag.assert_not_called()
+
+
+class TestTagAddCli:
+    """jd tag add — CLI wrapper around add_jd_tag."""
+
+    @patch("johnnydecimal.cli.add_jd_tag")
+    def test_tags_a_file(self, mock_add, tmp_jd_root, monkeypatch):
+        # Create a file inside 26.05 Sourdough
+        target = tmp_jd_root / "20-29 Projects" / "26 Recipes" / "26.05 Sourdough" / "recipe.txt"
+        target.write_text("flour water salt")
+
+        result = _run(tmp_jd_root, monkeypatch, ["tag", "add", "26.05", str(target)])
+
+        assert result.exit_code == 0
+        mock_add.assert_called_once_with(Path(str(target)), "26.05")
+
+    def test_error_when_path_missing(self, tmp_jd_root, monkeypatch):
+        result = _run(tmp_jd_root, monkeypatch, ["tag", "add", "26.05", "/nonexistent/file.txt"])
+
+        assert result.exit_code != 0
+
+    def test_error_when_id_not_found(self, tmp_jd_root, monkeypatch):
+        target = tmp_jd_root / "20-29 Projects" / "26 Recipes" / "26.05 Sourdough" / "recipe.txt"
+        target.write_text("flour water salt")
+
+        result = _run(tmp_jd_root, monkeypatch, ["tag", "add", "99.99", str(target)])
+
+        assert result.exit_code != 0
+
+
+class TestTagRemoveCli:
+    """jd tag remove — CLI wrapper around remove_jd_tag."""
+
+    @patch("johnnydecimal.cli.remove_jd_tag")
+    def test_removes_tag(self, mock_remove, tmp_jd_root, monkeypatch):
+        target = tmp_jd_root / "20-29 Projects" / "26 Recipes" / "26.05 Sourdough" / "recipe.txt"
+        target.write_text("flour water salt")
+
+        result = _run(tmp_jd_root, monkeypatch, ["tag", "remove", str(target)])
+
+        assert result.exit_code == 0
+        mock_remove.assert_called_once_with(Path(str(target)), None)
