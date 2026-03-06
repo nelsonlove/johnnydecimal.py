@@ -2394,6 +2394,162 @@ def unstage(jd_id, dry_run):
 
 
 # ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+
+def _format_size(nbytes):
+    """Format byte count as human-readable string."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(nbytes) < 1024:
+            return f"{nbytes:.1f} {unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f} PB"
+
+
+def _collect_stats(jd):
+    """Collect all stats from the JD tree. Returns a dict."""
+    from collections import Counter
+
+    all_ids = jd.all_ids()
+    archived = [i for i in all_ids if i.sequence == 99]
+    active_ids = [i for i in all_ids if i.sequence != 99]
+    all_categories = []
+    for area in jd.areas:
+        all_categories.extend(area.categories)
+
+    # Storage, file types, depth
+    total_size = 0
+    id_sizes = []
+    ext_counter = Counter()
+    max_depth = 0
+    max_depth_id = None
+    total_depth = 0
+    depth_count = 0
+    oldest_mtime = None
+    oldest_id = None
+    newest_mtime = None
+    newest_id = None
+
+    for jd_id in active_ids:
+        if not jd_id.path.is_dir():
+            continue
+        if jd_id.path.is_symlink():
+            continue
+        id_size = 0
+        id_max_depth = 0
+        id_base_depth = len(jd_id.path.parts)
+        try:
+            for f in jd_id.path.rglob("*"):
+                if f.name.startswith("."):
+                    continue
+                if f.is_file() and not f.is_symlink():
+                    try:
+                        st = f.stat()
+                        id_size += st.st_size
+                        total_size += st.st_size
+                    except (OSError, PermissionError):
+                        pass
+                    ext = f.suffix.lower() if f.suffix else "(none)"
+                    ext_counter[ext] += 1
+                rel_depth = len(f.parts) - id_base_depth
+                if rel_depth > id_max_depth:
+                    id_max_depth = rel_depth
+        except PermissionError:
+            pass
+
+        id_sizes.append((jd_id, id_size))
+        if id_max_depth > max_depth:
+            max_depth = id_max_depth
+            max_depth_id = jd_id
+        total_depth += id_max_depth
+        depth_count += 1
+
+        # Age — use directory mtime
+        try:
+            mtime = jd_id.path.stat().st_mtime
+            if oldest_mtime is None or mtime < oldest_mtime:
+                oldest_mtime = mtime
+                oldest_id = jd_id
+            if newest_mtime is None or mtime > newest_mtime:
+                newest_mtime = mtime
+                newest_id = jd_id
+        except (OSError, PermissionError):
+            pass
+
+    id_sizes.sort(key=lambda x: x[1], reverse=True)
+
+    # Empty categories (no content IDs — only xx.00/xx.01)
+    empty_cats = []
+    for cat in all_categories:
+        content_ids = [i for i in cat.ids if i.sequence not in (0, 1, 99)]
+        if not content_ids:
+            empty_cats.append(cat)
+
+    return {
+        "areas": len(jd.areas),
+        "categories": len(all_categories),
+        "ids": len(all_ids),
+        "archived": len(archived),
+        "total_size": total_size,
+        "largest_ids": [(str(i), s) for i, s in id_sizes[:5]],
+        "file_types": ext_counter.most_common(10),
+        "avg_depth": (total_depth / depth_count) if depth_count else 0,
+        "max_depth": max_depth,
+        "max_depth_id": str(max_depth_id) if max_depth_id else None,
+        "oldest": (str(oldest_id), datetime.fromtimestamp(oldest_mtime).strftime("%Y-%m-%d")) if oldest_id else None,
+        "newest": (str(newest_id), datetime.fromtimestamp(newest_mtime).strftime("%Y-%m-%d")) if newest_id else None,
+        "broken_symlinks": len(jd.broken_symlinks),
+        "orphan_dirs": len(jd.find_orphans()),
+        "empty_categories": len(empty_cats),
+    }
+
+
+@cli.command()
+def stats():
+    """Show system-wide statistics for the JD tree."""
+    jd = get_root()
+    s = _collect_stats(jd)
+
+    click.echo("Johnny Decimal -- Stats")
+    click.echo("=" * 40)
+
+    click.echo("\nStructure")
+    click.echo(f"  Areas:        {s['areas']}")
+    click.echo(f"  Categories:   {s['categories']}")
+    click.echo(f"  IDs:          {s['ids']} ({s['archived']} archived)")
+
+    click.echo(f"\nStorage")
+    click.echo(f"  Total size:   {_format_size(s['total_size'])}")
+    if s["largest_ids"]:
+        click.echo("  Largest IDs:")
+        for name, size in s["largest_ids"]:
+            click.echo(f"    {name:<30s} {_format_size(size)}")
+
+    if s["file_types"]:
+        click.echo("\nFile Types (top 10)")
+        for ext, count in s["file_types"]:
+            click.echo(f"  {ext:<10s} {count}")
+
+    click.echo(f"\nDepth (within IDs)")
+    click.echo(f"  Average:  {s['avg_depth']:.1f} levels")
+    if s["max_depth_id"]:
+        click.echo(f"  Deepest:  {s['max_depth_id']} ({s['max_depth']} levels)")
+
+    if s["oldest"] or s["newest"]:
+        click.echo(f"\nAge (by last modified)")
+        if s["oldest"]:
+            click.echo(f"  Oldest:   {s['oldest'][0]:<30s} {s['oldest'][1]}")
+        if s["newest"]:
+            click.echo(f"  Newest:   {s['newest'][0]:<30s} {s['newest'][1]}")
+
+    click.echo(f"\nHealth")
+    click.echo(f"  Broken symlinks:    {s['broken_symlinks']}")
+    click.echo(f"  Orphan dirs:        {s['orphan_dirs']}")
+    click.echo(f"  Empty categories:   {s['empty_categories']}")
+
+
+# ---------------------------------------------------------------------------
 # OmniFocus integration
 # ---------------------------------------------------------------------------
 
@@ -3282,6 +3438,71 @@ def _resolve_target(jd, target):
         raise SystemExit(1)
 
     return None
+
+
+@cli.command("claude")
+@click.argument("target", required=False, type=JD_ID)
+@click.option("-n", "--dry-run", is_flag=True, help="Show which files would be included without launching.")
+def claude_cmd(target, dry_run):
+    """Launch Claude Code with cascading JD context.
+
+    \b
+    Walks up from CWD (or TARGET) to the nearest JD level, collects
+    README, TODO, and CLAUDE files from each meta dir in the cascade,
+    and launches Claude with the combined context.
+
+    \b
+    Examples:
+        jd claude              → from CWD
+        jd claude 96.05        → from a specific ID
+        jd claude -n           → dry run, show what would be included
+    """
+    from johnnydecimal.claude import (
+        find_nearest_jd_level, build_context, format_context, launch_claude,
+    )
+    from johnnydecimal.util import get_jd_root_dir
+
+    jd = get_root()
+    root = jd.path
+
+    # Resolve target to a path
+    if target:
+        path = _resolve_target(jd, target)
+        if not path:
+            click.echo(f"{target} not found.", err=True)
+            raise SystemExit(1)
+    else:
+        path = Path.cwd()
+
+    # Find nearest JD level for working directory
+    working_dir = find_nearest_jd_level(path)
+    if not working_dir:
+        click.echo("Not inside a JD tree.", err=True)
+        raise SystemExit(1)
+
+    # Build cascading context
+    files = build_context(working_dir, root)
+
+    if dry_run:
+        if not files:
+            click.echo("No context files found.")
+        else:
+            click.echo(f"Working directory: {working_dir}")
+            click.echo(f"Context files ({len(files)}):")
+            for file_path, rel_path in files:
+                size = file_path.stat().st_size
+                click.echo(f"  {rel_path}  ({size} bytes)")
+        return
+
+    context = format_context(files)
+
+    if not shutil.which("claude"):
+        click.echo("claude not found in PATH.", err=True)
+        raise SystemExit(1)
+
+    returncode = launch_claude(working_dir, context)
+    if returncode:
+        raise SystemExit(returncode)
 
 
 @cli.command("cd")

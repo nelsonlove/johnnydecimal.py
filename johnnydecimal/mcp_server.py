@@ -1812,6 +1812,23 @@ def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def jd_stats() -> dict:
+    """Return system-wide statistics for the JD tree.
+
+    Includes structure counts, storage sizes, file type distribution,
+    depth metrics, age info, and health indicators.
+    """
+    from johnnydecimal.cli import _collect_stats
+    jd = _get_root()
+    return _collect_stats(jd)
+
+
+# ---------------------------------------------------------------------------
 # Staging
 # ---------------------------------------------------------------------------
 
