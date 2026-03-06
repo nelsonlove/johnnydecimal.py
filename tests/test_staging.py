@@ -400,3 +400,45 @@ class TestTagRemoveCli:
 
         assert result.exit_code == 0
         mock_remove.assert_called_once_with(Path(str(target)), None)
+
+
+class TestStageMcp:
+    """MCP tool wrappers for staging operations."""
+
+    def test_jd_stage_tool(self, tmp_jd_root, monkeypatch):
+        from johnnydecimal import mcp_server
+        from johnnydecimal.models import JDSystem
+        monkeypatch.setattr(mcp_server, "_get_root", lambda: JDSystem(tmp_jd_root))
+        sourdough = tmp_jd_root / "20-29 Projects" / "26 Recipes" / "26.05 Sourdough"
+        (sourdough / "recipe.txt").write_text("flour")
+        desktop = tmp_jd_root / "Desktop"
+        desktop.mkdir()
+        monkeypatch.setattr(mcp_server, "DESKTOP", desktop)
+
+        with patch("johnnydecimal.staging.add_jd_tag"):
+            result = mcp_server.jd_stage("26.05")
+
+        assert result["error"] is None
+        assert "recipe.txt" in result["staged"]
+
+    def test_jd_unstage_tool(self, tmp_jd_root, monkeypatch):
+        from johnnydecimal import mcp_server
+        from johnnydecimal.models import JDSystem
+        monkeypatch.setattr(mcp_server, "_get_root", lambda: JDSystem(tmp_jd_root))
+        desktop = tmp_jd_root / "Desktop"
+        desktop.mkdir()
+        monkeypatch.setattr(mcp_server, "DESKTOP", desktop)
+
+        with patch("johnnydecimal.staging.get_jd_tags", return_value=[]), \
+             patch("johnnydecimal.staging.remove_jd_tag"):
+            result = mcp_server.jd_unstage()
+
+        assert result["error"] is None
+        assert result["unstaged"] == []
+
+    def test_jd_stage_error_unknown_id(self, tmp_jd_root, monkeypatch):
+        from johnnydecimal import mcp_server
+        from johnnydecimal.models import JDSystem
+        monkeypatch.setattr(mcp_server, "_get_root", lambda: JDSystem(tmp_jd_root))
+        result = mcp_server.jd_stage("99.99")
+        assert result["error"] is not None

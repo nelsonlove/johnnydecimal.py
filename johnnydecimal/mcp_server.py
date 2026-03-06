@@ -9,8 +9,11 @@ from mcp.server.fastmcp import FastMCP
 
 from johnnydecimal import api
 from johnnydecimal.policy import resolve_policy, get_convention, get_volumes, get_links, find_root_policy
+from johnnydecimal.staging import stage_items, unstage_items, add_jd_tag, remove_jd_tag
 
 mcp = FastMCP("Johnny Decimal", json_response=True)
+
+DESKTOP = Path.home() / "Desktop"
 
 
 # ---------------------------------------------------------------------------
@@ -1806,6 +1809,66 @@ def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
         result["error"] = str(exc)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Staging
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def jd_stage(jd_id: str) -> dict:
+    """Stage a JD ID's contents to the Desktop.
+
+    Moves top-level items to ~/Desktop (prefixed with the ID),
+    tags them with JD:xx.xx, and leaves symlinks in the JD directory.
+    """
+    jd = _get_root()
+    target = jd.find_by_id(jd_id)
+    if not target:
+        return {"error": f"ID {jd_id} not found"}
+    if not target.path.is_dir():
+        return {"error": f"{jd_id} is a file-ID, not a directory"}
+    staged = stage_items(target.path, jd_id, DESKTOP)
+    return {"error": None, "jd_id": jd_id, "staged": staged}
+
+
+@mcp.tool()
+def jd_unstage(jd_id: str | None = None) -> dict:
+    """Return staged items from Desktop to their JD directories.
+
+    Scans ~/Desktop for JD-tagged items and moves them back.
+    Optionally filter by a specific JD ID.
+    """
+    jd = _get_root()
+    def find_id_dir(id_str):
+        obj = jd.find_by_id(id_str)
+        return obj.path if obj else None
+    result = unstage_items(DESKTOP, find_id_dir, filter_id=jd_id)
+    return {"error": None, "unstaged": result}
+
+
+@mcp.tool()
+def jd_tag_add(jd_id: str, path: str) -> dict:
+    """Add a JD Finder tag to a file or directory without moving it."""
+    jd = _get_root()
+    target = jd.find_by_id(jd_id)
+    if not target:
+        return {"error": f"ID {jd_id} not found"}
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return {"error": f"Path not found: {path}"}
+    add_jd_tag(p, jd_id)
+    return {"error": None, "tagged": str(p), "tag": f"JD:{jd_id}"}
+
+
+@mcp.tool()
+def jd_tag_remove(path: str, jd_id: str | None = None) -> dict:
+    """Remove JD Finder tag(s) from a file or directory."""
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return {"error": f"Path not found: {path}"}
+    remove_jd_tag(p, jd_id)
+    return {"error": None, "path": str(p), "removed": f"JD:{jd_id}" if jd_id else "all JD tags"}
 
 
 # ---------------------------------------------------------------------------
