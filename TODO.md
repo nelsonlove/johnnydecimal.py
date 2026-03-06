@@ -28,8 +28,7 @@
 - [ ] `jd backup` — snapshot the JD tree (metadata, structure, or full) to a tarball or manifest
 - [ ] `jd cp` — copy into JD (like mv but keeps original)
 - [ ] `jd renum` — batch renumber within a category
-- [ ] `jd stats` — system-wide statistics (total IDs, sizes, age distribution)
-- [ ] `jd gc` — clean up empty dirs, broken symlinks, .DS_Store
+- [x] `jd stats` — system-wide statistics (structure, storage, file types, depth, age, health)
 - [ ] Unified `jd.yaml` config file (replaces `.johnnydecimal.yaml`)
   - Two top-level keys: `policy:` (validation rules) and `config:` (behavior)
   - `jd.example.yaml` in the jd-cli repo as documented default
