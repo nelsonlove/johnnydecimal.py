@@ -34,7 +34,8 @@
   - `jd.example.yaml` in the jd-cli repo as documented default
   - Cascading: JD root → area meta dir → category meta dir → ID meta dir (each overrides)
   - Migrate existing `.johnnydecimal.yaml` policy into `jd.yaml` `policy:` key
-  - `config:` holds repo roots, staging prefs, ignore patterns, external drives, etc.
+  - `config:` holds repo roots, staging prefs, ignore patterns, external drives, claude include rules, etc.
+  - `config.claude.include` per-level overrides feed `jd claude` context cascade
 - [ ] `jd config edit [TARGET]` — open jd.yaml in `$EDITOR` at the appropriate level
   - No arg: root jd.yaml (00.00 Meta)
   - JD ID (e.g. `26.05`): that ID's meta dir jd.yaml
@@ -50,6 +51,8 @@
 - [ ] macOS alias detection (different from symlinks) — `mdls` or similar
 - [ ] External drive awareness — skip gracefully if unmounted
 - [ ] `jd validate --fix` — auto-fix simple issues (en-dash → hyphen, trailing spaces)
+- [ ] Detect stale `.claude` symlinks left behind by crashed `jd claude` sessions
+  - Flag in `jd validate`, count in `jd stats` health, clean up in `jd gc`
 
 ### Tab Completion
 - [ ] Test in real shell (Click's `_JD_COMPLETE=zsh_complete` needs `COMP_WORDS`)
@@ -98,6 +101,8 @@
   - Working dir pinned to nearest JD level (id → category → area → root) from CWD
   - JD tree has no `.git` — Claude Code won't auto-load CLAUDE.md, so `jd claude` handles all levels including current
   - `--dry-run` / `-n` — show which files would be included from which levels without launching
+  - Shared `.claude/` dir: canonical copy lives in `00.00 Meta/.claude/`, symlinked into working dir on launch
+  - `.claude.example/` template in jd-cli repo for bootstrapping
   - Configurable in `config.claude.include`:
     ```yaml
     config:
