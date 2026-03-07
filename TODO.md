@@ -89,30 +89,12 @@
 - [ ] `jd validate --notes` / `jd validate --omnifocus` for cross-app checks
 
 ### Agent Integration
-- [ ] `jd claude [TARGET]` — launch Claude Code with cascading JD context
+- [x] `jd claude [TARGET]` — launch Claude Code with cascading JD context
   - Walk up from CWD (or TARGET) to find nearest ID/category/area
   - Levels: system meta (00.00) → area meta (x0.00) → category meta (xx.00) → ID dir
-  - At each level, collect files matching `stems × extensions` (cartesian product) + `extra` globs
-  - `stems` and `extensions` define display order (stem > extension > level)
-  - Child levels append new stems/extensions only if not already present (preserves ordering)
-  - `extra` is local-only; `exclude` skips specific files at a given level
-  - Each file gets a header: `# path/relative/to/jd-root/FILENAME.md`
-  - Concatenate and pass via `claude --append-system-prompt`
-  - Working dir pinned to nearest JD level (id → category → area → root) from CWD
-  - JD tree has no `.git` — Claude Code won't auto-load CLAUDE.md, so `jd claude` handles all levels including current
-  - `--dry-run` / `-n` — show which files would be included from which levels without launching
-  - Shared `.claude/` dir: canonical copy lives in `00.00 Meta/.claude/`, symlinked into working dir on launch
-  - `.claude.example/` template in jd-cli repo for bootstrapping
-  - Configurable in `config.claude.include`:
-    ```yaml
-    config:
-      claude:
-        include:
-          stems: [README, TODO, CLAUDE]
-          extensions: [.md, .org, .txt]
-          extra: ["*.md"]  # does not cascade; globs match the defining dir only
-          exclude: []       # skip specific files at this level
-    ```
+  - stems × extensions cartesian product + extra globs, stem > extension > level ordering
+  - `--show` prints concatenated context; no TARGET defaults to ~/Documents working dir
+  - Per-level config via `config.claude.include` in jd.yaml (future, see jd config)
   - Retire POLICY.md — fold content into README.md (context/conventions) and CLAUDE.md (agent directives) at the system level
   - Define standard doc purposes in 00.00 README.md:
     - **README.md** — what this level contains, conventions, context (for humans and agents)
