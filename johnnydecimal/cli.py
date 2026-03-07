@@ -3441,9 +3441,9 @@ def _resolve_target(jd, target):
 
 
 @cli.command("claude")
-@click.argument("target", required=False, type=JD_ID)
-@click.option("-n", "--dry-run", is_flag=True, help="Show which files would be included without launching.")
-def claude_cmd(target, dry_run):
+@click.argument("target", required=False)
+@click.option("--show", is_flag=True, help="Print cascading context to stdout instead of launching.")
+def claude_cmd(target, show):
     """Launch Claude Code with cascading JD context.
 
     \b
@@ -3452,49 +3452,49 @@ def claude_cmd(target, dry_run):
     and launches Claude with the combined context.
 
     \b
+    TARGET can be a JD ID (26.05), category (26), area (20-29), or name.
+
+    \b
     Examples:
-        jd claude              → from CWD
-        jd claude 96.05        → from a specific ID
-        jd claude -n           → dry run, show what would be included
+        jd claude              → from CWD, working dir ~/Documents
+        jd claude 96.05        → context from 96.05, working dir is 96.05's path
+        jd claude Recipes      → context from Recipes category
+        jd claude --show       → print context without launching
     """
     from johnnydecimal.claude import (
         find_nearest_jd_level, build_context, format_context, launch_claude,
     )
-    from johnnydecimal.util import get_jd_root_dir
 
     jd = get_root()
     root = jd.path
 
-    # Resolve target to a path
+    # Resolve target to a path, determine working dir
     if target:
         path = _resolve_target(jd, target)
         if not path:
             click.echo(f"{target} not found.", err=True)
             raise SystemExit(1)
+        working_dir = path
     else:
         path = Path.cwd()
+        working_dir = Path.home() / "Documents"
 
-    # Find nearest JD level for working directory
-    working_dir = find_nearest_jd_level(path)
-    if not working_dir:
-        click.echo("Not inside a JD tree.", err=True)
-        raise SystemExit(1)
+    # Find nearest JD level for context cascade
+    jd_level = find_nearest_jd_level(path)
+    if not jd_level:
+        # If not inside JD tree (no target), cascade from root
+        jd_level = root
 
     # Build cascading context
-    files = build_context(working_dir, root)
+    files = build_context(jd_level, root)
+    context = format_context(files)
 
-    if dry_run:
+    if show:
         if not files:
             click.echo("No context files found.")
         else:
-            click.echo(f"Working directory: {working_dir}")
-            click.echo(f"Context files ({len(files)}):")
-            for file_path, rel_path in files:
-                size = file_path.stat().st_size
-                click.echo(f"  {rel_path}  ({size} bytes)")
+            click.echo(context)
         return
-
-    context = format_context(files)
 
     if not shutil.which("claude"):
         click.echo("claude not found in PATH.", err=True)
