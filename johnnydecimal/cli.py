@@ -2568,14 +2568,63 @@ def _omnifocus_check_enabled(jd):
 
 
 def _parse_jd_tags(tags: list[str]) -> list[str]:
-    """Extract JD IDs from tag names. E.g. ['JD:26.05', 'Work'] -> ['26.05']."""
+    """Extract JD IDs from tag names. E.g. ['JD:26.05', 'JD:26', 'JD:20-29'] -> ['26.05', '26', '20-29']."""
     import re
     result = []
     for tag in tags:
-        m = re.match(r"^JD:(\d{2}(?:\.\d{2})?)$", tag)
+        m = re.match(r"^JD:(\d{2}(?:\.\d{2})?(?:-\d{2})?)$", tag)
         if m:
             result.append(m.group(1))
     return result
+
+
+def _resolve_of_target(jd, target: str) -> tuple:
+    """Resolve a target string to an OmniFocus tag name and display name.
+
+    Returns (tag_name, display_name, match_fn) where match_fn(tags) -> bool
+    checks whether a project's tag list matches this target.
+
+    Accepts dotted IDs (26.05), categories (26), and areas (20-29).
+    """
+    import re
+
+    # Try as dotted ID (26.05)
+    jd_id = jd.find_by_id(target)
+    if jd_id:
+        tag = f"JD:{target}"
+        return tag, str(jd_id), lambda tags: tag in tags
+
+    # Try as area range (20-29)
+    area_match = re.match(r"^(\d{2})[-–](\d{2})$", target)
+    if area_match:
+        num = int(area_match.group(1))
+        area = None
+        for a in jd.areas:
+            if a._number == num:
+                area = a
+                break
+        if area:
+            tag = f"JD:{target}"
+            prefix = target[:2]
+            return tag, str(area), lambda tags: any(
+                t == tag or (t.startswith(f"JD:{prefix}") and t != tag)
+                for t in tags
+            )
+
+    # Try as category number (26)
+    try:
+        cat_num = int(target)
+        cat = jd.find_by_category(cat_num)
+        if cat:
+            tag = f"JD:{target}"
+            return tag, str(cat), lambda tags: any(
+                t == tag or t.startswith(f"JD:{target}.")
+                for t in tags
+            )
+    except ValueError:
+        pass
+
+    return None, None, None
 
 
 @omnifocus.command("scan")
@@ -2768,18 +2817,29 @@ JSON.stringify(result);
 
 
 @omnifocus.command("open")
-@click.argument("id_str", type=JD_ID)
-def omnifocus_open(id_str):
-    """Open the OmniFocus project tagged with a JD ID.
+@click.argument("target")
+def omnifocus_open(target):
+    """Open OmniFocus projects tagged with a JD target.
 
     \b
-    Example:
-        jd omnifocus open 26.05  → opens OF project tagged JD:26.05
+    TARGET can be an ID (26.05), category (26), or area (20-29).
+    For categories/areas, matches projects with that tag OR any child tag.
+
+    \b
+    Examples:
+        jd omnifocus open 26.05  → opens project tagged JD:26.05
+        jd omnifocus open 26     → opens projects tagged JD:26 or JD:26.xx
+        jd omnifocus open 20-29  → opens projects tagged JD:20-29 or JD:2x.xx
     """
     from johnnydecimal.omnifocus import list_projects_with_jd_tags, open_project, OmniFocusError
 
     jd = get_root()
     _omnifocus_check_enabled(jd)
+
+    tag_name, display_name, match_fn = _resolve_of_target(jd, target)
+    if not tag_name:
+        click.echo(f"{target} not found in JD tree.", err=True)
+        raise SystemExit(1)
 
     try:
         projects = list_projects_with_jd_tags()
@@ -2787,12 +2847,10 @@ def omnifocus_open(id_str):
         click.echo(f"ERROR: Could not read OmniFocus: {exc}", err=True)
         raise SystemExit(1)
 
-    # Find projects tagged with this ID
-    tag_name = f"JD:{id_str}"
-    matches = [p for p in projects if tag_name in p["tags"]]
+    matches = [p for p in projects if match_fn(p["tags"])]
 
     if not matches:
-        click.echo(f"No OmniFocus project tagged with {tag_name}.", err=True)
+        click.echo(f"No OmniFocus project matching {tag_name}.", err=True)
         raise SystemExit(1)
 
     if len(matches) == 1:
@@ -2803,33 +2861,36 @@ def omnifocus_open(id_str):
             click.echo(f"ERROR: {exc}", err=True)
             raise SystemExit(1)
     else:
-        click.echo(f"Multiple projects tagged {tag_name}:")
+        click.echo(f"Projects matching {tag_name}:")
         for proj in matches:
             folder = f" ({proj['folder']})" if proj.get("folder") else ""
             click.echo(f"  {proj['name']}{folder}")
 
 
 @omnifocus.command("tag")
-@click.argument("id_str", type=JD_ID)
-def omnifocus_tag(id_str):
-    """Create a JD:xx.xx tag in OmniFocus for a JD ID.
+@click.argument("target")
+def omnifocus_tag(target):
+    """Create a JD tag in OmniFocus.
 
     \b
-    Example:
-        jd omnifocus tag 26.05  → creates JD:26.05 tag in OF
+    TARGET can be an ID (26.05), category (26), or area (20-29).
+
+    \b
+    Examples:
+        jd omnifocus tag 26.05  → creates JD:26.05 tag
+        jd omnifocus tag 26     → creates JD:26 tag
+        jd omnifocus tag 20-29  → creates JD:20-29 tag
     """
     from johnnydecimal.omnifocus import create_tag, OmniFocusError
 
     jd = get_root()
     _omnifocus_check_enabled(jd)
 
-    # Validate ID exists in JD tree
-    jd_id = jd.find_by_id(id_str)
-    if not jd_id:
-        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+    tag_name, display_name, _ = _resolve_of_target(jd, target)
+    if not tag_name:
+        click.echo(f"{target} not found in JD tree.", err=True)
         raise SystemExit(1)
 
-    tag_name = f"JD:{id_str}"
     try:
         create_tag(tag_name)
         click.echo(f"Created tag: {tag_name}")
@@ -2839,14 +2900,18 @@ def omnifocus_tag(id_str):
 
 
 @omnifocus.command("create")
-@click.argument("id_str", type=JD_ID)
+@click.argument("target")
 @click.option("--folder", "folder_name", default=None, help="Place project in this OF folder.")
-def omnifocus_create(id_str, folder_name):
-    """Create an OmniFocus project for a JD ID with a JD tag.
+def omnifocus_create(target, folder_name):
+    """Create an OmniFocus project for a JD target with a JD tag.
+
+    \b
+    TARGET can be an ID (26.05), category (26), or area (20-29).
 
     \b
     Examples:
         jd omnifocus create 26.05              → create "26.05 Sourdough" with JD:26.05 tag
+        jd omnifocus create 26                 → create "26 Recipes" with JD:26 tag
         jd omnifocus create 26.05 --folder Recipes  → place in OF folder "Recipes"
     """
     from johnnydecimal.omnifocus import create_tag, create_project, OmniFocusError
@@ -2854,13 +2919,10 @@ def omnifocus_create(id_str, folder_name):
     jd = get_root()
     _omnifocus_check_enabled(jd)
 
-    jd_id = jd.find_by_id(id_str)
-    if not jd_id:
-        click.echo(f"ID {id_str} not found in JD tree.", err=True)
+    tag_name, display_name, _ = _resolve_of_target(jd, target)
+    if not tag_name:
+        click.echo(f"{target} not found in JD tree.", err=True)
         raise SystemExit(1)
-
-    project_name = str(jd_id)
-    tag_name = f"JD:{id_str}"
 
     try:
         # Ensure tag exists
@@ -2870,14 +2932,20 @@ def omnifocus_create(id_str, folder_name):
         if not folder_name:
             from johnnydecimal.omnifocus import list_folders
             of_folders = list_folders()
-            area_name = jd_id.category.parent._name
-            for f in of_folders:
-                if area_name.lower() in f["name"].lower():
-                    folder_name = f["name"]
-                    break
+            # Find the area for this target
+            path = _resolve_target(jd, target)
+            if path:
+                for a in jd.areas:
+                    if path.is_relative_to(a.path):
+                        area_name = a._name
+                        for f in of_folders:
+                            if area_name.lower() in f["name"].lower():
+                                folder_name = f["name"]
+                                break
+                        break
 
-        result = create_project(project_name, folder=folder_name, tags=[tag_name])
-        click.echo(f"Created project: {project_name}")
+        create_project(display_name, folder=folder_name, tags=[tag_name])
+        click.echo(f"Created project: {display_name}")
         if folder_name:
             click.echo(f"  Folder: {folder_name}")
         click.echo(f"  Tag: {tag_name}")

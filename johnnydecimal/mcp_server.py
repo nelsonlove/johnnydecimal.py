@@ -1729,28 +1729,32 @@ def jd_omnifocus_validate() -> dict:
 
 
 @mcp.tool()
-def jd_omnifocus_open(id_str: str) -> dict:
-    """Open the OmniFocus project tagged with a JD ID.
+def jd_omnifocus_open(target: str) -> dict:
+    """Open OmniFocus projects tagged with a JD target.
 
-    Finds OF projects with the JD:xx.xx tag and opens in OmniFocus.
+    TARGET can be an ID (26.05), category (26), or area (20-29).
+    For categories/areas, matches projects with that tag OR any child tag.
     """
     from johnnydecimal.omnifocus import list_projects_with_jd_tags, open_project, OmniFocusError
     from johnnydecimal.policy import is_omnifocus_enabled
+    from johnnydecimal.cli import _resolve_of_target
 
     jd = _get_root()
     if not is_omnifocus_enabled(jd.path):
         return {"error": "OmniFocus integration disabled"}
 
-    tag_name = f"JD:{id_str}"
+    tag_name, display_name, match_fn = _resolve_of_target(jd, target)
+    if not tag_name:
+        return {"error": f"{target} not found in JD tree"}
 
     try:
         projects = list_projects_with_jd_tags()
     except OmniFocusError as exc:
         return {"error": str(exc)}
 
-    matches = [p for p in projects if tag_name in p["tags"]]
+    matches = [p for p in projects if match_fn(p["tags"])]
     if not matches:
-        return {"error": f"No OmniFocus project tagged with {tag_name}"}
+        return {"error": f"No OmniFocus project matching {tag_name}"}
 
     if len(matches) == 1:
         try:
@@ -1766,28 +1770,28 @@ def jd_omnifocus_open(id_str: str) -> dict:
 
 
 @mcp.tool()
-def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
-    """Create an OmniFocus project for a JD ID with a JD tag.
+def jd_omnifocus_create(target: str, folder: str | None = None) -> dict:
+    """Create an OmniFocus project for a JD target with a JD tag.
 
-    Automatically creates the JD:xx.xx tag and tries to match the JD area
+    TARGET can be an ID (26.05), category (26), or area (20-29).
+    Automatically creates the tag and tries to match the JD area
     to an OF folder if no folder is specified.
     """
     from johnnydecimal.omnifocus import (
         create_tag, create_project, list_folders, OmniFocusError,
     )
     from johnnydecimal.policy import is_omnifocus_enabled
+    from johnnydecimal.cli import _resolve_of_target, _resolve_target
 
     jd = _get_root()
     if not is_omnifocus_enabled(jd.path):
         return {"error": "OmniFocus integration disabled"}
 
-    jd_id = jd.find_by_id(id_str)
-    if not jd_id:
-        return {"error": f"ID {id_str} not found"}
+    tag_name, display_name, _ = _resolve_of_target(jd, target)
+    if not tag_name:
+        return {"error": f"{target} not found in JD tree"}
 
-    project_name = str(jd_id)
-    tag_name = f"JD:{id_str}"
-    result = {"id": id_str, "project": project_name, "created": [], "error": None}
+    result = {"target": target, "project": display_name, "created": [], "error": None}
 
     try:
         create_tag(tag_name)
@@ -1795,14 +1799,19 @@ def jd_omnifocus_create(id_str: str, folder: str | None = None) -> dict:
 
         if not folder:
             of_folders = list_folders()
-            area_name = jd_id.category.parent._name
-            for f in of_folders:
-                if area_name.lower() in f["name"].lower():
-                    folder = f["name"]
-                    break
+            path = _resolve_target(jd, target)
+            if path:
+                for a in jd.areas:
+                    if path.is_relative_to(a.path):
+                        area_name = a._name
+                        for f in of_folders:
+                            if area_name.lower() in f["name"].lower():
+                                folder = f["name"]
+                                break
+                        break
 
-        create_project(project_name, folder=folder, tags=[tag_name])
-        result["created"].append(f"project:{project_name}")
+        create_project(display_name, folder=folder, tags=[tag_name])
+        result["created"].append(f"project:{display_name}")
         if folder:
             result["folder"] = folder
     except OmniFocusError as exc:

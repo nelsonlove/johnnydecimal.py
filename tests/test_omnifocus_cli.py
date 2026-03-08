@@ -114,7 +114,7 @@ class TestOmniFocusOpen:
         with patch("johnnydecimal.omnifocus.list_projects_with_jd_tags", return_value=[]):
             result = _run_omnifocus(tmp_jd_root, monkeypatch, ["open", "26.05"])
         assert result.exit_code == 1
-        assert "No OmniFocus project tagged" in result.output
+        assert "No OmniFocus project matching" in result.output
 
     def test_multiple_matches(self, tmp_jd_root, monkeypatch):
         projects = [
@@ -125,7 +125,7 @@ class TestOmniFocusOpen:
         ]
         with patch("johnnydecimal.omnifocus.list_projects_with_jd_tags", return_value=projects):
             result = _run_omnifocus(tmp_jd_root, monkeypatch, ["open", "26.05"])
-        assert "Multiple projects" in result.output
+        assert "Projects matching" in result.output
         assert "Project A" in result.output
         assert "Project B" in result.output
 

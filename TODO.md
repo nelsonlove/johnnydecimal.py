@@ -84,6 +84,11 @@
 ### Cross-App Integration
 - [x] Apple Notes connector (scan, validate, stub, create, open)
 - [x] OmniFocus connector (scan, validate, open, tag, create)
+- [x] OmniFocus commands accept categories (`JD:26`) and areas (`JD:20-29`), not just dotted IDs
+  - `jd omnifocus tag 26` creates `JD:26`; `jd omnifocus tag 20-29` creates `JD:20-29`
+  - `jd omnifocus open 26` opens projects tagged `JD:26` or any `JD:26.xx`
+  - `jd omnifocus create 26` creates a project for the category with `JD:26` tag
+  - scan/validate report category and area tags alongside ID tags
 - [ ] Email (IMAP) folder structure
 - [ ] Obsidian vault alignment (if kept)
 - [ ] `jd validate --notes` / `jd validate --omnifocus` for cross-app checks
