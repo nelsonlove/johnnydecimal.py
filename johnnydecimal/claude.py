@@ -6,6 +6,7 @@ collects context files from each meta dir in the cascade, and launches Claude
 with the concatenated context via --append-system-prompt.
 """
 
+import re
 import subprocess
 import shutil
 from pathlib import Path
@@ -18,7 +19,7 @@ from johnnydecimal.util import (
 
 
 # Defaults — will be configurable via jd.yaml config.claude.include
-DEFAULT_STEMS = ["README", "TODO", "CLAUDE"]
+DEFAULT_STEMS = ["README", "TODO", "CLAUDE", "AUDIT", "TIMELINE"]
 DEFAULT_EXTENSIONS = [".md", ".org", ".txt"]
 
 
@@ -81,6 +82,56 @@ def get_context_dir(level: Path) -> Optional[Path]:
     if is_jd_id(level):
         return level
     return find_meta_dir(level)
+
+def _is_area_meta_prefix(prefix: str) -> bool:
+    """True if prefix is a round area number: 00, 10, 20, ..., 90."""
+    try:
+        return int(prefix) % 10 == 0
+    except ValueError:
+        return False
+
+
+def get_proposals_dir(level: Path) -> Optional[Path]:
+    """
+    For area-level meta categories, find the sibling xx.02 *Proposals* dir.
+    Only recognised for round-numbered prefixes (00, 10, 20, ..., 90).
+    """
+    context_dir = get_context_dir(level)
+    if context_dir is None or not context_dir.is_dir():
+        return None
+    m = re.match(r'^([0-9]{2})\.00[ .]', context_dir.name)
+    if not m or not _is_area_meta_prefix(m.group(1)):
+        return None
+    prefix = m.group(1)
+    parent = context_dir.parent  # the xx.00's parent = area meta category dir
+    for child in sorted(parent.iterdir()):
+        if (child.is_dir()
+                and re.match(rf'^{prefix}\.02', child.name)
+                and 'Proposals' in child.name):
+            return child
+    return None
+
+
+def get_proposals_entry(
+    proposals_dir: Path, root: Path
+) -> Optional[tuple]:
+    """
+    Return a synthetic (None, header, content) tuple listing .md files.
+    Returns None if the proposals dir is empty.
+    """
+    md_files = sorted(
+        f.name for f in proposals_dir.iterdir()
+        if f.is_file() and f.suffix == '.md'
+    )
+    if not md_files:
+        return None
+    try:
+        rel = str(proposals_dir.relative_to(root))
+    except ValueError:
+        rel = proposals_dir.name
+    listing = "\n".join(f"  - {f}" for f in md_files)
+    content = f"Proposals ({proposals_dir.name}):\n{listing}"
+    return (None, rel, content)
 
 
 def collect_files_at_level(
@@ -185,14 +236,34 @@ def build_context(
             rel = f.name
         result.append((f, str(rel)))
 
+    # Append proposals listings for area levels (synthetic entries, deduplicated)
+    seen_proposals: set[Path] = set()
+    for level in levels:
+        proposals_dir = get_proposals_dir(level)
+        if proposals_dir and proposals_dir not in seen_proposals:
+            seen_proposals.add(proposals_dir)
+            entry = get_proposals_entry(proposals_dir, root)
+            if entry:
+                result.append(entry)
+
     return result
 
 
-def format_context(files: list[tuple[Path, str]]) -> str:
-    """Format collected files into a single string with headers."""
+def format_context(files: list[tuple]) -> str:
+    """Format collected files into a single string with headers.
+
+    Each entry is either:
+      (Path, header)              — real file; content read from disk
+      (None, header, content_str) — synthetic entry (e.g. proposals listing)
+    """
     sections = []
-    for file_path, rel_path in files:
-        content = file_path.read_text(errors="replace").strip()
+    for item in files:
+        if item[0] is None:
+            # Synthetic entry: (None, header, content)
+            _, rel_path, content = item
+        else:
+            file_path, rel_path = item[0], item[1]
+            content = file_path.read_text(errors="replace").strip()
         if content:
             sections.append(f"# {rel_path}\n\n{content}")
     return "\n\n---\n\n".join(sections)
