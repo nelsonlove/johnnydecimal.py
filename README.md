@@ -36,6 +36,8 @@ jd triage              # show where attention is needed
 | `jd index` | Print the full JD index |
 | `jd json` | Output the full index as JSON (for agent consumption) |
 | `jd root` | Print the root directory of the filing system |
+| `jd open <TARGET>` | Open a JD location in Finder |
+| `jd stats` | System-wide statistics (structure, storage, file types, health) |
 
 `jd cd` requires a shell wrapper. Run `jd cd --setup` to print it, then add to your `.zshrc`:
 
@@ -81,6 +83,17 @@ jd mv -a 21             # → 20.99 Archive/21 Old Projects/
 jd restore 86.03        # exact reversal
 jd restore --renumber 86.03  # if 86.03 is now taken, assigns next available
 ```
+
+### Staging & Finder Tags
+
+| Command | Description |
+|---------|-------------|
+| `jd stage <ID>` | Move ID's top-level items to `~/Desktop` (ID-prefixed), tag with `JD:xx.xx`, leave symlinks in JD dir. `--add` keeps existing staged items |
+| `jd unstage [ID]` | Scan Desktop for JD-tagged items and move them back. No arg = unstage all |
+| `jd tag add <ID> <PATH>` | Add a `JD:xx.xx` Finder tag to a file or directory (no move) |
+| `jd tag remove <PATH>` | Strip `JD:*` Finder tags from a file or directory |
+
+Staging puts JD items on your Desktop for active work, with Finder tags and symlinks maintaining the link back to JD. Unstaging reverses it cleanly.
 
 ### Validation & Triage
 
@@ -275,6 +288,16 @@ The MCP server provides 29 tools covering navigation, creation, moving, archivin
 | `jd_policy` / `jd_policy_set` | Read and write policy |
 
 Resources: `jd://tree` (full index), `jd://policy` (effective policy).
+
+## Claude Code Integration
+
+```bash
+jd claude              # launch Claude Code with cascading JD context from CWD
+jd claude 26           # launch scoped to category 26
+jd claude --show       # print the collected context instead of launching
+```
+
+`jd claude` walks up from the current working directory (or TARGET) to the nearest JD level and collects context files (README.md, TODO.md, CLAUDE.md, AUDIT.md, TIMELINE.md, PLAN.md) from each meta dir in the cascade: system meta (`00.00`) → area meta (`x0.00`) → category meta (`xx.00`) → ID dir.
 
 ## Shell Completion
 

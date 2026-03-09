@@ -213,16 +213,18 @@ Don't duplicate content between them. README.md is context; CLAUDE.md is directi
 
 ## What's Implemented
 
-### CLI commands (all working, 105 tests passing)
-- **Navigation:** `cd`, `ls`, `which`, `search`, `index`, `json`, `root`, `open`
+### CLI commands (all working, 153 tests passing)
+- **Navigation:** `cd`, `ls`, `which`, `search`, `index`, `json`, `root`, `open`, `stats`
 - **Creating:** `new id`, `new category`, `init`, `init-all`, `add`
 - **Moving:** `mv` (renumber, refile, rename), archiving (`mv -a`), `restore`
 - **Validation:** `validate` (with `--fix`, `--force`, `--dry-run`), `triage`, `generate-index`
+- **Staging:** `stage`, `unstage`, `tag add`, `tag remove`
 - **Symlinks:** `symlinks`, `ln`
 - **Volumes:** `volume list`, `volume scan`, `volume index`, `volume link`
 - **Apple Notes:** `notes scan`, `notes validate`, `notes stub`, `notes create`, `notes open`
 - **OmniFocus:** `omnifocus scan`, `omnifocus validate`, `omnifocus open`, `omnifocus tag`, `omnifocus create`
 - **Policy:** `policy show`, `policy get`, `policy set`, `policy unset`, `policy where`
+- **Agent integration:** `claude` (cascading context launch)
 - **MCP server:** 29 tools + 2 resources, mirrors all CLI functionality
 
 ### Infrastructure
@@ -264,7 +266,7 @@ Don't duplicate content between them. README.md is context; CLAUDE.md is directi
 
 ```
 johnnydecimal/
-  cli.py          — Click commands (~3200 lines)
+  cli.py          — Click commands (~3600 lines)
   mcp_server.py   — MCP tools mirroring CLI commands
   models.py       — JDRoot, JDArea, JDCategory, JDID
   policy.py       — Cascading .johnnydecimal.yaml policy system
@@ -272,7 +274,7 @@ johnnydecimal/
   util.py         — Path helpers, JD pattern matching
   notes.py        — Apple Notes connector (JXA)
   omnifocus.py    — OmniFocus connector (JXA)
-tests/            — 105 tests (pytest)
+tests/            — 153 tests (pytest)
 docs/             — Integration guides
 ```
 
