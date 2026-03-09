@@ -19,7 +19,7 @@ from johnnydecimal.util import (
 
 
 # Defaults — will be configurable via jd.yaml config.claude.include
-DEFAULT_STEMS = ["README", "TODO", "CLAUDE", "AUDIT", "TIMELINE"]
+DEFAULT_STEMS = ["README", "TODO", "CLAUDE", "AUDIT", "TIMELINE", "PLAN"]
 DEFAULT_EXTENSIONS = [".md", ".org", ".txt"]
 
 
