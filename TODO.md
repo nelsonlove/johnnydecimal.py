@@ -100,13 +100,9 @@
   - stems × extensions cartesian product + extra globs, stem > extension > level ordering
   - `--show` prints concatenated context; no TARGET defaults to ~/Documents working dir
   - Per-level config via `config.claude.include` in jd.yaml (future, see jd config)
-  - Retire POLICY.md — fold content into README.md (context/conventions) and CLAUDE.md (agent directives) at the system level
-  - Define standard doc purposes in 00.00 README.md:
-    - **README.md** — what this level contains, conventions, context (for humans and agents)
-    - **TODO.md** — open tasks and plans for this level
-    - **CLAUDE.md** — agent-specific instructions (behavioral rules, constraints, preferences)
+  - ~~Retire POLICY.md~~ — trimmed and now injected via jd-workflows plugin SessionStart hook
+  - ~~00.00 CLAUDE.md~~ — deleted; activity logging automated via SessionEnd hook
   - Any ALL-CAPS `.md` files at JD meta levels (REPOS.md, etc.) should be documented or folded into the standard three
-- [ ] Make `jd` an OpenClaw skill so all agents can use it
 - [ ] `jd.json` cached index (faster than filesystem scan every time)
 
 ### Known Issues

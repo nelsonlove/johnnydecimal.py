@@ -258,7 +258,6 @@ Don't duplicate content between them. README.md is context; CLAUDE.md is directi
 - Email (IMAP) folder structure
 - Obsidian vault alignment
 - `jd validate --notes` / `jd validate --omnifocus` for cross-app checks
-- Make `jd` an OpenClaw skill for all agents
 - `jd.json` cached index for faster lookups
 
 ## Architecture

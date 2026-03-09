@@ -194,7 +194,7 @@ Cascading policy files (`.johnnydecimal.yaml`) control conventions at any level 
 
 This tool enforces (and validates) a set of JD conventions:
 
-- **`x0 Meta - [Area]`** — area-level meta category (exception: `00-09 Meta`)
+- **`x0 Meta - [Area]`** — area-level meta category (exception: `00-09 System`)
 - **`xx.00`** — category meta (agent workspace, config, templates)
 - **`xx.01 Unsorted`** — category-level triage inbox
 - **`xx.99 Archive`** — category-level archive (auto-created by `jd mv -a`)
