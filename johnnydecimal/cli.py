@@ -3409,7 +3409,7 @@ def ls_cmd(ctx, target, area, level, dirs_only):
             subprocess.run(ls_cmd)
         return
 
-    cmd = ["tree", "-I", ".DS_Store|.git|__pycache__|.Trash"]
+    cmd = ["tree", "-a", "--gitignore", "-I", ".DS_Store|.git|__pycache__|.Trash"]
     if level is not None:
         cmd += ["-L", str(level)]
     if dirs_only:
